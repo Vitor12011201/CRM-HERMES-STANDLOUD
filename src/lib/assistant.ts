@@ -5,6 +5,16 @@ const maxMessageLength = 4_000;
 // Hermes, and the CRM MCP server several times before the model can answer.
 // Controlled writes are executed serially by the Hermes tool executor.
 const requestTimeoutMs = 90_000;
+const availabilityTimeoutMs = 3_000;
+
+type HermesDiagnosticCode =
+  | "HERMES_UNCONFIGURED"
+  | "HERMES_CONFIG_INVALID"
+  | "HERMES_UNREACHABLE"
+  | "HERMES_TIMEOUT"
+  | "HERMES_AUTH_FAILED"
+  | "HERMES_UPSTREAM_ERROR"
+  | "HERMES_INVALID_RESPONSE";
 
 export const assistantChatSchema = z
   .object({
@@ -53,6 +63,36 @@ function createAbortSignal(timeoutMs: number) {
   };
 }
 
+function logHermesDiagnostic(
+  operation: "status" | "chat",
+  code: HermesDiagnosticCode,
+  details: { durationMs?: number; status?: number; baseUrlPresent?: boolean; apiKeyPresent?: boolean } = {},
+) {
+  const duration = details.durationMs === undefined ? "" : ` duration_ms=${details.durationMs}`;
+  const status = details.status === undefined ? "" : ` status=${details.status}`;
+  const baseUrl = details.baseUrlPresent === undefined ? "" : ` base_url_present=${details.baseUrlPresent}`;
+  const apiKey = details.apiKeyPresent === undefined ? "" : ` api_key_present=${details.apiKeyPresent}`;
+  console.warn(`assistant.${operation} code=${code}${status}${duration}${baseUrl}${apiKey}`);
+}
+
+function logUnconfiguredHermes(operation: "status" | "chat", configuration: HermesConfiguration) {
+  logHermesDiagnostic(operation, "HERMES_UNCONFIGURED", {
+    baseUrlPresent: Boolean(configuration.baseUrl),
+    apiKeyPresent: Boolean(configuration.apiKey),
+  });
+}
+
+function logInvalidHermesConfiguration(operation: "status" | "chat", configuration: HermesConfiguration) {
+  logHermesDiagnostic(operation, "HERMES_CONFIG_INVALID", {
+    baseUrlPresent: Boolean(configuration.baseUrl),
+    apiKeyPresent: Boolean(configuration.apiKey),
+  });
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 function getHermesEndpoint(baseUrl: string) {
   const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   return new URL("v1/chat/completions", normalizedBaseUrl).toString();
@@ -86,12 +126,21 @@ function unavailableResult(status = 503): HermesChatResult {
   };
 }
 
+function timeoutResult(): HermesChatResult {
+  return {
+    ok: false,
+    status: 503,
+    message: "Hermes demorou mais que o esperado para responder.",
+  };
+}
+
 export async function sendHermesChat(
   input: AssistantChatInput,
   configuration: HermesConfiguration,
   fetchImpl: FetchLike = fetch,
 ): Promise<HermesChatResult> {
   if (!configuration.baseUrl || !configuration.apiKey) {
+    logUnconfiguredHermes("chat", configuration);
     return unavailableResult();
   }
 
@@ -100,10 +149,12 @@ export async function sendHermesChat(
   try {
     endpoint = getHermesEndpoint(configuration.baseUrl);
   } catch {
+    logInvalidHermesConfiguration("chat", configuration);
     return unavailableResult();
   }
 
   const abort = createAbortSignal(requestTimeoutMs);
+  const startedAt = Date.now();
 
   try {
     const response = await fetchImpl(endpoint, {
@@ -124,6 +175,11 @@ export async function sendHermesChat(
     });
 
     if (!response.ok) {
+      logHermesDiagnostic(
+        "chat",
+        response.status === 401 ? "HERMES_AUTH_FAILED" : "HERMES_UPSTREAM_ERROR",
+        { status: response.status, durationMs: Date.now() - startedAt },
+      );
       return unavailableResult(response.status === 401 ? 502 : 503);
     }
 
@@ -131,11 +187,20 @@ export async function sendHermesChat(
     const content = body.choices?.[0]?.message?.content?.trim();
 
     if (!content) {
+      logHermesDiagnostic("chat", "HERMES_INVALID_RESPONSE", {
+        durationMs: Date.now() - startedAt,
+      });
       return unavailableResult(502);
     }
 
     return { ok: true, content };
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) {
+      logHermesDiagnostic("chat", "HERMES_TIMEOUT", { durationMs: Date.now() - startedAt });
+      return timeoutResult();
+    }
+
+    logHermesDiagnostic("chat", "HERMES_UNREACHABLE", { durationMs: Date.now() - startedAt });
     return unavailableResult();
   } finally {
     abort.clear();
@@ -147,6 +212,7 @@ export async function getHermesAvailability(
   fetchImpl: FetchLike = fetch,
 ): Promise<boolean> {
   if (!configuration.baseUrl || !configuration.apiKey) {
+    logUnconfiguredHermes("status", configuration);
     return false;
   }
 
@@ -158,18 +224,32 @@ export async function getHermesAvailability(
       : `${configuration.baseUrl}/`;
     endpoint = new URL("v1/models", normalizedBaseUrl).toString();
   } catch {
+    logInvalidHermesConfiguration("status", configuration);
     return false;
   }
 
-  const abort = createAbortSignal(3_000);
+  const abort = createAbortSignal(availabilityTimeoutMs);
+  const startedAt = Date.now();
 
   try {
     const response = await fetchImpl(endpoint, {
       headers: { Authorization: `Bearer ${configuration.apiKey}` },
       signal: abort.signal,
     });
+    if (!response.ok) {
+      logHermesDiagnostic(
+        "status",
+        response.status === 401 ? "HERMES_AUTH_FAILED" : "HERMES_UPSTREAM_ERROR",
+        { status: response.status, durationMs: Date.now() - startedAt },
+      );
+    }
     return response.ok;
-  } catch {
+  } catch (error) {
+    logHermesDiagnostic(
+      "status",
+      isAbortError(error) ? "HERMES_TIMEOUT" : "HERMES_UNREACHABLE",
+      { durationMs: Date.now() - startedAt },
+    );
     return false;
   } finally {
     abort.clear();
