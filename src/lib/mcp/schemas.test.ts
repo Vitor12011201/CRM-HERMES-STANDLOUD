@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addLeadActivityInputSchema,
   listLeadsInputSchema,
+  parseMcpFollowUpDate,
   setLeadFollowUpInputSchema,
   setLeadStatusInputSchema,
   updateLeadQualificationInputSchema,
@@ -27,5 +28,6 @@ describe("MCP input schemas", () => {
     expect(updateLeadQualificationInputSchema.safeParse({ leadId, qualificationScore: 11 }).success).toBe(false);
     expect(setLeadFollowUpInputSchema.safeParse({ leadId, nextFollowUpAt: "2026-09-21" }).success).toBe(true);
     expect(setLeadFollowUpInputSchema.safeParse({ leadId, nextFollowUpAt: "not-a-date" }).success).toBe(false);
+    expect(parseMcpFollowUpDate("2026-09-21").toISOString()).toBe("2026-09-21T00:00:00.000Z");
   });
 });

@@ -1,7 +1,7 @@
 import type { LeadStatus } from "@/generated/prisma/enums";
 import { db } from "@/lib/db";
 import { getFunnelMetrics } from "@/lib/dashboard";
-import { getUtcDayBounds } from "@/lib/format";
+import { getFollowUpTiming } from "@/lib/business-time";
 import { getLeadClassification, leadStatuses } from "@/lib/lead";
 
 export type DueFollowUpOptions = {
@@ -56,29 +56,16 @@ const followUpSelect = {
   nextFollowUpAt: true,
 } as const;
 
-export async function getDueFollowUps(options: DueFollowUpOptions) {
-  const { start, end } = getUtcDayBounds();
-  const [overdue, today, upcoming] = await Promise.all([
-    db.lead.findMany({
-      where: { nextFollowUpAt: { lt: start } },
-      orderBy: { nextFollowUpAt: "asc" },
-      take: options.limit,
-      select: followUpSelect,
-    }),
-    db.lead.findMany({
-      where: { nextFollowUpAt: { gte: start, lte: end } },
-      orderBy: { nextFollowUpAt: "asc" },
-      take: options.limit,
-      select: followUpSelect,
-    }),
-    options.includeUpcoming
-      ? db.lead.findMany({
-        where: { nextFollowUpAt: { gt: end } },
-        orderBy: { nextFollowUpAt: "asc" },
-        take: options.limit,
-        select: followUpSelect,
-      })
-      : Promise.resolve([]),
-  ]);
+export async function getDueFollowUps(options: DueFollowUpOptions, reference = new Date()) {
+  const followUps = await db.lead.findMany({
+    where: { nextFollowUpAt: { not: null } },
+    orderBy: { nextFollowUpAt: "asc" },
+    select: followUpSelect,
+  });
+  const overdue = followUps.filter((lead) => getFollowUpTiming(lead.nextFollowUpAt!, reference) === "OVERDUE").slice(0, options.limit);
+  const today = followUps.filter((lead) => getFollowUpTiming(lead.nextFollowUpAt!, reference) === "TODAY").slice(0, options.limit);
+  const upcoming = options.includeUpcoming
+    ? followUps.filter((lead) => getFollowUpTiming(lead.nextFollowUpAt!, reference) === "UPCOMING").slice(0, options.limit)
+    : [];
   return { overdue, today, upcoming };
 }

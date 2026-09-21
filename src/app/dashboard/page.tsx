@@ -4,7 +4,8 @@ import type { Lead } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { getFunnelMetrics } from "@/lib/dashboard";
 import { getFinancialTotals } from "@/lib/finance";
-import { formatCurrency, formatDate, getUtcDayBounds } from "@/lib/format";
+import { formatCalendarDate, formatCurrency } from "@/lib/format";
+import { getFollowUpTiming } from "@/lib/business-time";
 import { getLeadClassification } from "@/lib/lead";
 import { PageHeader } from "@/components/PageHeader";
 
@@ -14,7 +15,7 @@ type FollowUpLead = Pick<Lead, "id" | "companyName" | "nextFollowUpAt">;
 
 function FollowUpList({ items, empty, overdueList = false }: { items: FollowUpLead[]; empty: string; overdueList?: boolean }) {
   if (items.length === 0) return <p className="mt-3 text-sm text-muted">{empty}</p>;
-  return <ul className="mt-3 space-y-2">{items.map((lead) => <li key={lead.id} className="flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2"><div className="min-w-0"><Link href={`/leads/${lead.id}`} className="block truncate text-sm font-medium text-brand hover:underline">{lead.companyName}</Link><span className="text-xs text-muted">{formatDate(lead.nextFollowUpAt)}</span></div><span className={overdueList ? "text-xs font-semibold text-red-700" : "text-xs text-muted"}>{overdueList ? "Atrasado" : "Agendado"}</span></li>)}</ul>;
+  return <ul className="mt-3 space-y-2">{items.map((lead) => <li key={lead.id} className="flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2"><div className="min-w-0"><Link href={`/leads/${lead.id}`} className="block truncate text-sm font-medium text-brand hover:underline">{lead.companyName}</Link><span className="text-xs text-muted">{formatCalendarDate(lead.nextFollowUpAt)}</span></div><span className={overdueList ? "text-xs font-semibold text-red-700" : "text-xs text-muted"}>{overdueList ? "Atrasado" : "Agendado"}</span></li>)}</ul>;
 }
 
 export default async function DashboardPage() {
@@ -22,8 +23,8 @@ export default async function DashboardPage() {
   const [leads, projects] = await Promise.all([db.lead.findMany({ orderBy: { nextFollowUpAt: "asc" } }), db.project.findMany({ include: { payments: true } })]);
   const metrics = getFunnelMetrics(leads);
   const finance = getFinancialTotals(projects.filter((project) => project.status !== "CANCELLED"));
-  const { start: startToday, end: endToday } = getUtcDayBounds();
-  const followUps = leads.filter((lead) => lead.nextFollowUpAt); const overdue = followUps.filter((lead) => lead.nextFollowUpAt! < startToday); const today = followUps.filter((lead) => lead.nextFollowUpAt! >= startToday && lead.nextFollowUpAt! <= endToday); const upcoming = followUps.filter((lead) => lead.nextFollowUpAt! > endToday).slice(0, 6);
+  const reference = new Date();
+  const followUps = leads.filter((lead) => lead.nextFollowUpAt); const overdue = followUps.filter((lead) => getFollowUpTiming(lead.nextFollowUpAt!, reference) === "OVERDUE"); const today = followUps.filter((lead) => getFollowUpTiming(lead.nextFollowUpAt!, reference) === "TODAY"); const upcoming = followUps.filter((lead) => getFollowUpTiming(lead.nextFollowUpAt!, reference) === "UPCOMING").slice(0, 6);
   const scoreCounts = { A: leads.filter((lead) => getLeadClassification(lead.qualificationScore) === "A").length, B: leads.filter((lead) => getLeadClassification(lead.qualificationScore) === "B").length, C: leads.filter((lead) => getLeadClassification(lead.qualificationScore) === "C").length };
   const counts = [{ label: "Total de leads", value: leads.length }, { label: "Leads A", value: scoreCounts.A }, { label: "Leads B", value: scoreCounts.B }, { label: "Leads C", value: scoreCounts.C }, { label: "Contatados", value: metrics.contacted }, { label: "Respostas", value: metrics.replied }, { label: "Interessados", value: metrics.interested }, { label: "Propostas", value: metrics.proposals }, { label: "Ganhos", value: metrics.won }, { label: "Perdidos", value: leads.filter((lead) => lead.status === "LOST").length }];
   const rates = [{ label: "Taxa de resposta", value: percentage(metrics.responseRate) }, { label: "Taxa de interesse", value: percentage(metrics.interestRate) }, { label: "Taxa de proposta", value: percentage(metrics.proposalRate) }, { label: "Conversão lead → cliente", value: percentage(metrics.conversionRate) }];

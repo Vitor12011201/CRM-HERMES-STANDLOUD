@@ -1,4 +1,5 @@
 import { ActivityChannel, ActivityType, LeadStatus } from "@/generated/prisma/enums";
+import { parseStoredCalendarDate } from "@/lib/business-time";
 import { z } from "zod";
 
 const leadIdSchema = z.string().trim().cuid("Informe um identificador de lead valido.").max(64);
@@ -12,7 +13,7 @@ const followUpDateSchema = z.string().trim().min(10).max(40).refine((value) => {
 }, "Informe uma data ISO valida (AAAA-MM-DD ou data/hora ISO).");
 
 export function parseMcpFollowUpDate(value: string) {
-  return new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00.000Z` : value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? parseStoredCalendarDate(value) : new Date(value);
 }
 
 export const listLeadsInputSchema = z.object({

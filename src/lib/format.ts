@@ -1,3 +1,5 @@
+import { businessTimeZone, getFollowUpTiming, getStoredCalendarDateKey, isStoredCalendarDate } from "./business-time";
+
 export function formatCurrency(valueInCents: number) {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
@@ -5,26 +7,31 @@ export function formatCurrency(valueInCents: number) {
   }).format(valueInCents / 100);
 }
 
+export function formatCalendarDate(value?: Date | string | null) {
+  if (!value) return "—";
+  // Calendar fields are stored as midnight UTC to preserve their YYYY-MM-DD value.
+  return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(new Date(value));
+}
+
+export function formatDateTime(value?: Date | string | null) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "medium", timeZone: businessTimeZone }).format(new Date(value));
+}
+
 export function formatDate(value?: Date | string | null) {
   if (!value) return "—";
-  // Form inputs capture a calendar day, not a timestamp. Keeping this in UTC
-  // avoids showing the previous day in Brazil for values stored at midnight.
-  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(value));
+  const date = new Date(value);
+  return isStoredCalendarDate(date) ? formatCalendarDate(date) : formatDateTime(date);
 }
 
-export function toDateInputValue(value?: Date | string | null) {
+export function toCalendarDateInputValue(value?: Date | string | null) {
   if (!value) return "";
-  return new Date(value).toISOString().slice(0, 10);
+  return getStoredCalendarDateKey(value);
 }
 
-export function getUtcDayBounds(reference = new Date()) {
-  const start = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate()));
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 1);
-  end.setUTCMilliseconds(-1);
-  return { start, end };
-}
+// Kept for existing form consumers; all CRM form dates use the calendar convention above.
+export const toDateInputValue = toCalendarDateInputValue;
 
 export function isOverdueFollowUp(value?: Date | string | null, reference = new Date()) {
-  return Boolean(value && new Date(value) < getUtcDayBounds(reference).start);
+  return Boolean(value && getFollowUpTiming(value, reference) === "OVERDUE");
 }
