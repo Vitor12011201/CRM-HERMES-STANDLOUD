@@ -3,6 +3,7 @@ import type { ActivityChannel, ActivityType, LeadStatus } from "@/generated/pris
 import { db } from "@/lib/db";
 import { getLeadClassification, leadStatusLabels } from "@/lib/lead";
 import { ServiceNotFoundError } from "./errors";
+import { leadResearchSelection, toLeadResearchOutput } from "./lead-research";
 
 export type LeadListFilters = {
   status?: LeadStatus;
@@ -88,15 +89,23 @@ export async function listLeads(filters: LeadListFilters) {
 }
 
 export async function getLeadDetail(leadId: string) {
-  return db.lead.findUnique({
+  const lead = await db.lead.findUnique({
     where: { id: leadId },
     include: {
       activities: {
         orderBy: { createdAt: "desc" },
         take: 20,
       },
+      ...leadResearchSelection,
     },
   });
+  if (!lead) return null;
+
+  const { evidences, analysis, _count, ...leadDetail } = lead;
+  return {
+    ...leadDetail,
+    research: toLeadResearchOutput({ evidences, analysis, _count }),
+  };
 }
 
 async function requireLead(leadId: string) {

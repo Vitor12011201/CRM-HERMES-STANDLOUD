@@ -20,17 +20,35 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { addLeadActivity, setLeadStatus } from "./leads";
+import { addLeadActivity, getLeadDetail, setLeadStatus } from "./leads";
 
 const leadId = "lead-1";
 let current: { id: string; status: "NEW" | "CONTACTED" | "REPLIED"; lastContactAt: Date | null };
 let activityNumber: number;
+let detailLead: Record<string, unknown> | null;
+
+function createDetailLead(overrides: Record<string, unknown> = {}) {
+  return {
+    id: leadId,
+    companyName: "Lead de pesquisa",
+    qualificationScore: 8,
+    status: "CONTACTED",
+    activities: [{ id: "activity-1", type: "NOTE", note: "Atividade recente" }],
+    evidences: [],
+    analysis: null,
+    _count: { evidences: 0 },
+    ...overrides,
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
   current = { id: leadId, status: "NEW", lastContactAt: null };
   activityNumber = 0;
-  mocks.leadFindUnique.mockImplementation(async () => ({ ...current }));
+  detailLead = null;
+  mocks.leadFindUnique.mockImplementation(async (args: { include?: unknown }) => (
+    args.include ? detailLead : { ...current }
+  ));
   mocks.leadUpdate.mockImplementation(async ({ data }) => {
     current = { ...current, ...data };
     return { ...current };
@@ -114,5 +132,128 @@ describe("lead activity contact consistency", () => {
       data: expect.objectContaining({ type: "STATUS_CHANGE" }),
     }));
     expect(mocks.leadUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("lead detail research context", () => {
+  it("returns an explicit empty research state", async () => {
+    detailLead = createDetailLead();
+
+    const detail = await getLeadDetail(leadId);
+
+    expect(detail?.research).toEqual({
+      evidences: [],
+      analysis: null,
+      evidenceTotal: 0,
+      evidenceReturned: 0,
+      evidenceTruncated: false,
+    });
+    expect(detail?.activities).toEqual([{ id: "activity-1", type: "NOTE", note: "Atividade recente" }]);
+  });
+
+  it("returns bounded evidence in observedAt descending order with only agent-useful fields", async () => {
+    const newest = {
+      id: "evidence-new",
+      sourceType: "WEBSITE",
+      sourceUrl: "https://empresa.example",
+      observation: "O site tem formulario de contato.",
+      observedAt: new Date("2026-09-21T15:00:00.000Z"),
+      capturedBy: "USER",
+    };
+    const older = {
+      id: "evidence-old",
+      sourceType: "GOOGLE_MAPS",
+      sourceUrl: null,
+      observation: "O perfil mostra avaliacoes publicas.",
+      observedAt: new Date("2026-09-20T15:00:00.000Z"),
+      capturedBy: "AGENT",
+    };
+    detailLead = createDetailLead({ evidences: [newest, older], _count: { evidences: 2 } });
+
+    const detail = await getLeadDetail(leadId);
+
+    expect(detail?.research.evidences).toEqual([newest, older]);
+    expect(mocks.leadFindUnique).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        evidences: expect.objectContaining({ orderBy: { observedAt: "desc" }, take: 20 }),
+      }),
+    }));
+  });
+
+  it("returns analysis separately from evidence without changing commercial lead fields", async () => {
+    const analysis = {
+      summary: "A presenca digital parece incompleta.",
+      opportunity: "Uma landing page pode reduzir atrito.",
+      commercialSignals: "Empresa aparenta operar ativamente.",
+      demoConcept: "Demo com CTA de orcamento rapido.",
+      confidence: "MEDIUM",
+      updatedBy: "USER",
+      updatedAt: new Date("2026-09-21T15:00:00.000Z"),
+    };
+    detailLead = createDetailLead({ analysis });
+
+    const detail = await getLeadDetail(leadId);
+
+    expect(detail?.research.analysis).toEqual(analysis);
+    expect(mocks.leadUpdate).not.toHaveBeenCalled();
+    expect(mocks.leadUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns evidence and analysis together while preserving their structural separation", async () => {
+    const evidence = {
+      id: "evidence-1",
+      sourceType: "INSTAGRAM",
+      sourceUrl: "https://instagram.example/empresa",
+      observation: "O perfil exibe trabalhos recentes.",
+      observedAt: new Date("2026-09-21T14:00:00.000Z"),
+      capturedBy: "USER",
+    };
+    const analysis = {
+      summary: "Ha atividade recente em canal social.",
+      opportunity: null,
+      commercialSignals: null,
+      demoConcept: null,
+      confidence: "LOW",
+      updatedBy: "USER",
+      updatedAt: new Date("2026-09-21T15:00:00.000Z"),
+    };
+    detailLead = createDetailLead({ evidences: [evidence], analysis, _count: { evidences: 1 } });
+
+    const detail = await getLeadDetail(leadId);
+
+    expect(detail?.research).toMatchObject({
+      evidences: [evidence],
+      analysis,
+      evidenceTotal: 1,
+      evidenceReturned: 1,
+      evidenceTruncated: false,
+    });
+  });
+
+  it("reports total and truncation when evidence exceeds the bounded payload", async () => {
+    const evidences = Array.from({ length: 20 }, (_, index) => ({
+      id: `evidence-${index}`,
+      sourceType: "OTHER",
+      sourceUrl: null,
+      observation: `Observacao ${index}`,
+      observedAt: new Date(`2026-09-${String(20 - index).padStart(2, "0")}T12:00:00.000Z`),
+      capturedBy: "USER",
+    }));
+    detailLead = createDetailLead({ evidences, _count: { evidences: 21 } });
+
+    const detail = await getLeadDetail(leadId);
+
+    expect(detail?.research).toMatchObject({
+      evidenceTotal: 21,
+      evidenceReturned: 20,
+      evidenceTruncated: true,
+    });
+    expect(detail?.research.evidences).toHaveLength(20);
+  });
+
+  it("preserves the null result for a nonexistent lead", async () => {
+    detailLead = null;
+
+    await expect(getLeadDetail(leadId)).resolves.toBeNull();
   });
 });

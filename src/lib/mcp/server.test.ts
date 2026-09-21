@@ -82,6 +82,61 @@ describe("STANDLOUD MCP server", () => {
     await client.close();
   });
 
+  it("returns bounded factual evidence and separate analysis through the read-only get_lead tool", async () => {
+    mocks.getLeadDetail.mockResolvedValue({
+      id: leadId,
+      companyName: "Lead de teste",
+      qualificationScore: 8,
+      status: "CONTACTED",
+      activities: [{ id: "activity-1", type: "NOTE", note: "Atividade recente" }],
+      research: {
+        evidences: [{
+          id: "evidence-1",
+          sourceType: "WEBSITE",
+          sourceUrl: "https://empresa.example",
+          observation: "O site apresenta formulario.",
+          observedAt: "2026-09-21T15:00:00.000Z",
+          capturedBy: "USER",
+        }],
+        analysis: {
+          summary: "A oportunidade parece consistente.",
+          opportunity: "Uma landing page pode reduzir atrito.",
+          commercialSignals: null,
+          demoConcept: null,
+          confidence: "MEDIUM",
+          updatedBy: "USER",
+          updatedAt: "2026-09-21T16:00:00.000Z",
+        },
+        evidenceTotal: 1,
+        evidenceReturned: 1,
+        evidenceTruncated: false,
+      },
+    });
+    const { client } = await createClient();
+
+    const tools = await client.listTools();
+    const getLeadTool = tools.tools.find((tool) => tool.name === "get_lead");
+    const result = await client.callTool({ name: "get_lead", arguments: { leadId } });
+    const payload = JSON.parse(toolText(result));
+
+    expect(getLeadTool?.description).toContain("pesquisa estruturada");
+    expect(getLeadTool?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+    expect(payload.lead).toMatchObject({
+      classification: "A",
+      activities: [{ id: "activity-1" }],
+      research: {
+        evidences: [expect.objectContaining({ sourceType: "WEBSITE", observation: "O site apresenta formulario." })],
+        analysis: expect.objectContaining({ confidence: "MEDIUM" }),
+        evidenceTotal: 1,
+        evidenceReturned: 1,
+        evidenceTruncated: false,
+      },
+    });
+    expect(mocks.getLeadDetail).toHaveBeenCalledWith(leadId);
+    expect(mocks.runAuditedAgentWrite).not.toHaveBeenCalled();
+    await client.close();
+  });
+
   it("executes safe writes through auditing and permitted services", async () => {
     mocks.setLeadStatus.mockResolvedValue({ result: { status: "CONTACTED", changed: true }, beforeData: { status: "NEW" }, afterData: { status: "CONTACTED" } });
     mocks.updateLeadQualification.mockResolvedValue({ result: { qualificationScore: 10, classification: "A", mainProblem: null, changed: true }, beforeData: { qualificationScore: 5 }, afterData: { qualificationScore: 10 } });

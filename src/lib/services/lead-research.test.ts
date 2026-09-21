@@ -33,7 +33,7 @@ beforeEach(() => {
   storedAnalysis = null;
   mocks.leadFindUnique.mockImplementation(async (args: { select?: unknown }) => {
     if (!leadExists) return null;
-    if (args.select) return { evidences: [{ id: "evidence-new" }], analysis: storedAnalysis };
+    if (args.select) return { evidences: [{ id: "evidence-new" }], analysis: storedAnalysis, _count: { evidences: 1 } };
     return { id: leadId, qualificationScore: 8, status: "CONTACTED", lastContactAt: new Date("2026-09-20T12:00:00.000Z"), nextFollowUpAt: new Date("2026-09-22T00:00:00.000Z") };
   });
   mocks.evidenceCreate.mockImplementation(async ({ data }) => ({ id: "evidence-1", ...data }));
@@ -94,10 +94,22 @@ describe("lead research services", () => {
     expect(mocks.leadUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("returns evidence ordered by observation date and the single active analysis", async () => {
+  it("returns bounded research with evidence metadata and the single active analysis", async () => {
     const research = await getLeadResearch(leadId);
 
-    expect(research).toEqual({ evidences: [{ id: "evidence-new" }], analysis: null });
-    expect(mocks.leadFindUnique).toHaveBeenLastCalledWith(expect.objectContaining({ select: expect.objectContaining({ evidences: { orderBy: { observedAt: "desc" } }, analysis: true }) }));
+    expect(research).toEqual({
+      evidences: [{ id: "evidence-new" }],
+      analysis: null,
+      evidenceTotal: 1,
+      evidenceReturned: 1,
+      evidenceTruncated: false,
+    });
+    expect(mocks.leadFindUnique).toHaveBeenLastCalledWith(expect.objectContaining({
+      select: expect.objectContaining({
+        evidences: expect.objectContaining({ orderBy: { observedAt: "desc" }, take: 20 }),
+        analysis: expect.anything(),
+        _count: { select: { evidences: true } },
+      }),
+    }));
   });
 });
