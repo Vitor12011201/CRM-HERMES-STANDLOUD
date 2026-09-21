@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #f7f8f7;
+  color: #1c2328;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button, input, select, textarea { font: inherit; }
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+
+@layer components {
+  .page { @apply mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8; }
+  .panel { @apply rounded-xl border border-line bg-white shadow-sm; }
+  .panel-pad { @apply rounded-xl border border-line bg-white p-4 shadow-sm sm:p-5; }
+  .section-title { @apply text-sm font-semibold text-ink; }
+  .muted { @apply text-sm text-muted; }
+  .field-label { @apply mb-1 block text-sm font-medium text-slate-700; }
+  .field { @apply w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-ink outline-none transition placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-50; }
+  .textarea { @apply field min-h-24 resize-y; }
+  .button { @apply inline-flex min-h-9 items-center justify-center rounded-md px-3 py-2 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60; }
+  .button-primary { @apply button bg-brand text-white hover:bg-[#1c3028] focus:ring-brand; }
+  .button-secondary { @apply button border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus:ring-slate-400; }
+  .button-danger { @apply button bg-red-700 text-white hover:bg-red-800 focus:ring-red-700; }
+  .data-table { @apply min-w-full text-left text-sm; }
+  .data-table th { @apply whitespace-nowrap border-b border-line bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500; }
+  .data-table td { @apply border-b border-line px-4 py-3 align-middle text-slate-700; }
+  .data-table tr:last-child td { @apply border-b-0; }
+}

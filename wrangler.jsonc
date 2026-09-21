@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "standloud-crm",
+  "compatibility_date": "2026-09-20",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "main": "vinext/server/fetch-handler",
+  "assets": {
+    "directory": "dist/client",
+    "not_found_handling": "none",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "standloud-crm-prod",
+      "database_id": "5e3373f0-79c0-452b-8f51-abfcb23b2931",
+      "migrations_dir": "prisma/migrations"
+    }
+  ]
+}

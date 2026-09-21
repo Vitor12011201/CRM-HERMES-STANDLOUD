@@ -1,0 +1,149 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  runtime  = "cloudflare"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum LeadStatus {
+  NEW
+  QUALIFIED
+  CONTACTED
+  REPLIED
+  INTERESTED
+  DEMO_SENT
+  MEETING
+  PROPOSAL_SENT
+  WON
+  LOST
+}
+
+enum ActivityType {
+  NOTE
+  CONTACT
+  FOLLOW_UP
+  REPLY
+  DEMO
+  MEETING
+  PROPOSAL
+  STATUS_CHANGE
+}
+
+enum ActivityChannel {
+  WHATSAPP
+  EMAIL
+  PHONE
+  INSTAGRAM
+  LINKEDIN
+  OTHER
+}
+
+enum ProjectStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum AgentActor {
+  USER
+  AGENT
+}
+
+model Lead {
+  id                 String         @id @default(cuid())
+  companyName        String
+  city               String?
+  region             String?
+  segment            String?
+  websiteUrl         String?
+  googleMapsUrl      String?
+  instagramUrl       String?
+  whatsapp           String?
+  phone              String?
+  email              String?
+  source             String?
+  primaryService     String?
+  googleRating       Float?
+  googleReviewCount  Int?
+  mainProblem        String?
+  qualificationScore Int            @default(0)
+  status             LeadStatus     @default(NEW)
+  notes              String?
+  demoUrl            String?
+  videoUrl           String?
+  proposalUrl        String?
+  lastContactAt      DateTime?
+  nextFollowUpAt     DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  activities         LeadActivity[]
+  projects           Project[]
+
+  @@index([status])
+  @@index([nextFollowUpAt])
+}
+
+model LeadActivity {
+  id        String           @id @default(cuid())
+  leadId    String
+  createdAt DateTime         @default(now())
+  type      ActivityType
+  channel   ActivityChannel?
+  note      String
+  lead      Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+}
+
+model Project {
+  id                 String        @id @default(cuid())
+  leadId             String?
+  clientName         String
+  projectName        String
+  totalAmountCents   Int
+  status             ProjectStatus @default(ACTIVE)
+  startDate          DateTime?
+  completionDate     DateTime?
+  notes              String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  lead               Lead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  payments           Payment[]
+
+  @@index([status])
+  @@index([leadId])
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  projectId     String
+  amountCents   Int
+  paidAt        DateTime
+  paymentMethod String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, paidAt])
+}
+
+model AgentAuditLog {
+  id           String     @id @default(cuid())
+  actor        AgentActor
+  actorName    String?
+  toolName     String
+  entityType   String
+  entityId     String
+  action       String
+  beforeData   String?
+  afterData    String?
+  success      Boolean    @default(false)
+  errorMessage String?
+  createdAt    DateTime   @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([toolName, createdAt])
+}
