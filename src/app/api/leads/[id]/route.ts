@@ -3,6 +3,7 @@ import { requireApiSession } from "@/lib/auth/api";
 import { db } from "@/lib/db";
 import { leadSchema } from "@/lib/validation";
 import { leadStatusLabels } from "@/lib/lead";
+import { addLeadActivity } from "@/lib/services/leads";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const unauthorized = await requireApiSession();
@@ -19,7 +20,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     // The D1 Prisma adapter currently does not provide transaction guarantees.
     // Persist the primary edit first, then write its audit activity.
     const lead = await db.lead.update({ where: { id }, data: parsed.data });
-    await db.leadActivity.create({ data: { leadId: id, type: "STATUS_CHANGE", note: `Status alterado de ${leadStatusLabels[current.status]} para ${leadStatusLabels[parsed.data.status]}.` } });
+    await addLeadActivity(id, { type: "STATUS_CHANGE", note: `Status alterado de ${leadStatusLabels[current.status]} para ${leadStatusLabels[parsed.data.status]}.` });
     return NextResponse.json({ lead });
   }
   const lead = await db.lead.update({ where: { id }, data: parsed.data });

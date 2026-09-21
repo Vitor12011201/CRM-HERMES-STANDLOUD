@@ -19,6 +19,8 @@ export type LeadActivityInput = {
   type: ActivityType;
   channel?: ActivityChannel;
   note: string;
+  /** Internal callers may preserve the original event time during imports. */
+  createdAt?: Date;
 };
 
 export type LeadMutationOutcome<T> = {
@@ -103,12 +105,38 @@ async function requireLead(leadId: string) {
   return lead;
 }
 
+function isContactActivity(type: ActivityType) {
+  return type === "CONTACT" || type === "REPLY";
+}
+
 export async function addLeadActivity(
   leadId: string,
   input: LeadActivityInput,
 ) {
   await requireLead(leadId);
-  const activity = await db.leadActivity.create({ data: { leadId, ...input } });
+  const createdAt = input.createdAt ?? new Date();
+  const activityData = {
+    leadId,
+    type: input.type,
+    ...(input.channel ? { channel: input.channel } : {}),
+    note: input.note,
+    createdAt,
+  };
+  const activity = isContactActivity(input.type)
+    ? (await db.$transaction([
+      db.leadActivity.create({ data: activityData }),
+      db.lead.updateMany({
+        where: {
+          id: leadId,
+          OR: [
+            { lastContactAt: null },
+            { lastContactAt: { lt: createdAt } },
+          ],
+        },
+        data: { lastContactAt: createdAt },
+      }),
+    ]))[0]
+    : await db.leadActivity.create({ data: activityData });
   return {
     result: { activity },
     beforeData: {},
@@ -142,12 +170,9 @@ export async function setLeadStatus(
   }
 
   await db.lead.update({ where: { id: leadId }, data: { status } });
-  await db.leadActivity.create({
-    data: {
-      leadId,
-      type: "STATUS_CHANGE",
-      note: `Status alterado de ${leadStatusLabels[current.status]} para ${leadStatusLabels[status]}.`,
-    },
+  await addLeadActivity(leadId, {
+    type: "STATUS_CHANGE",
+    note: `Status alterado de ${leadStatusLabels[current.status]} para ${leadStatusLabels[status]}.`,
   });
   return {
     result: { status, changed: true },
