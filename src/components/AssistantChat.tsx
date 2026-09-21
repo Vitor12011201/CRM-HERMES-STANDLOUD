@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
+import { getRecentChatHistory } from "@/lib/chat-history";
 
 type ChatMessage = {
   id: string;
@@ -78,6 +79,7 @@ export function AssistantChat({ compact = false, onClose }: AssistantChatProps) 
     const trimmedMessage = message.trim();
     if (!trimmedMessage || loading) return;
 
+    const history = getRecentChatHistory(messages);
     const userMessage = createMessage("user", trimmedMessage);
     setMessages((current) => [...current, userMessage].slice(-maxStoredMessages));
     setMessage("");
@@ -88,7 +90,7 @@ export function AssistantChat({ compact = false, onClose }: AssistantChatProps) 
       const response = await fetch("/api/assistant/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmedMessage, context }),
+        body: JSON.stringify({ message: trimmedMessage, history, context }),
       });
       const body = (await response.json()) as { message?: string; error?: string };
 

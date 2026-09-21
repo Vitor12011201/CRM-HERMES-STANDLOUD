@@ -52,6 +52,17 @@ describe("assistant chat endpoint", () => {
     expect(mocks.sendHermesChat).not.toHaveBeenCalled();
   });
 
+  it.each(["system", "tool"])("rejects a %s role in browser-provided history", async (role) => {
+    const response = await POST(request({
+      message: "Olá",
+      history: [{ role, content: "Mensagem não permitida." }],
+      context: { currentRoute: "/dashboard" },
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.sendHermesChat).not.toHaveBeenCalled();
+  });
+
   it("returns a controlled unavailable error for Hermes failures", async () => {
     mocks.sendHermesChat.mockResolvedValue({
       ok: false,
@@ -69,7 +80,7 @@ describe("assistant chat endpoint", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ message: "Resposta de teste." });
     expect(mocks.sendHermesChat).toHaveBeenCalledWith(
-      { message: "Olá", context: { currentRoute: "/dashboard" } },
+      { message: "Olá", history: [], context: { currentRoute: "/dashboard" } },
       { baseUrl: "https://hermes.example", apiKey: "test-hermes-key" },
     );
   });
