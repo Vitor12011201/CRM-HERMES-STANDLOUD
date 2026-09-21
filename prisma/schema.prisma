@@ -52,6 +52,21 @@ enum AgentActor {
   AGENT
 }
 
+enum EvidenceSourceType {
+  WEBSITE
+  GOOGLE_MAPS
+  INSTAGRAM
+  FACEBOOK
+  LINKEDIN
+  OTHER
+}
+
+enum AnalysisConfidence {
+  LOW
+  MEDIUM
+  HIGH
+}
+
 model Lead {
   id                 String         @id @default(cuid())
   companyName        String
@@ -81,6 +96,8 @@ model Lead {
   updatedAt          DateTime       @updatedAt
   activities         LeadActivity[]
   projects           Project[]
+  evidences          LeadEvidence[]
+  analysis           LeadAnalysis?
 
   @@index([status])
   @@index([nextFollowUpAt])
@@ -96,6 +113,35 @@ model LeadActivity {
   lead      Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@index([leadId, createdAt])
+}
+
+model LeadEvidence {
+  id          String             @id @default(cuid())
+  leadId      String
+  sourceType  EvidenceSourceType
+  sourceUrl   String?
+  observation String
+  observedAt  DateTime           @default(now())
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  capturedBy  AgentActor         @default(USER)
+  lead        Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, observedAt])
+}
+
+model LeadAnalysis {
+  id                String             @id @default(cuid())
+  leadId            String             @unique
+  summary           String?
+  opportunity       String?
+  commercialSignals String?
+  demoConcept       String?
+  confidence        AnalysisConfidence
+  updatedBy         AgentActor         @default(USER)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  lead              Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
 }
 
 model Project {
