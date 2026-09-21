@@ -125,8 +125,8 @@ function getHermesEndpoint(baseUrl: string) {
 
 export function buildSystemMessage(context: AssistantChatInput["context"]) {
   const leadContext = context.currentLeadId
-    ? ` O usuário está visualizando o lead com ID ${context.currentLeadId}.`
-    : "";
+    ? ` O usuário está visualizando o lead com ID ${context.currentLeadId}. Esse ID identifica o lead atual e tem precedência para referências contextuais como "este lead", "esse lead", "lead atual", "esta empresa", "essa empresa", "ele" ou "ela" quando se referirem ao contexto atual. Nesses casos, use get_lead diretamente com esse ID, sem pedir nome, e-mail ou telefone e sem usar list_leads para descobrir um lead que já está identificado. Se o usuário mencionar claramente outro lead, empresa ou pessoa, resolva essa outra referência separadamente.`
+    : " Não há currentLeadId nesta conversa; não invente um lead atual.";
 
   return [
     "Você é Hermes, um assistente do CRM interno da STANDLOUD.",

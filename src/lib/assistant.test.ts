@@ -53,6 +53,23 @@ describe("assistant chat validation", () => {
 });
 
 describe("Hermes system instructions", () => {
+  it("resolves current-lead references directly from currentLeadId", () => {
+    const prompt = buildSystemMessage({ currentRoute: "/leads/lead-123", currentLeadId: "lead-123" });
+
+    expect(prompt).toContain("lead com ID lead-123");
+    expect(prompt).toContain('"este lead"');
+    expect(prompt).toContain("use get_lead diretamente com esse ID");
+    expect(prompt).toContain("sem pedir nome, e-mail ou telefone");
+    expect(prompt).toContain("sem usar list_leads");
+    expect(prompt).toContain("outro lead, empresa ou pessoa");
+  });
+
+  it("does not invent a current lead when currentLeadId is absent", () => {
+    const prompt = buildSystemMessage({ currentRoute: "/leads" });
+
+    expect(prompt).toContain("Não há currentLeadId nesta conversa");
+  });
+
   it("allows only the three explicit safe writes and keeps all other mutations prohibited", () => {
     const prompt = buildSystemMessage({ currentRoute: "/leads/lead-123", currentLeadId: "lead-123" });
 
