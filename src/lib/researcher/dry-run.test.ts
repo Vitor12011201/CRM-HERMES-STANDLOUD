@@ -91,8 +91,16 @@ describe("Researcher V1a dry-run", () => {
     expect(request.messages[1].role).toBe("user");
   });
 
-  it("fails closed for invalid JSON and unknown commercial output fields", async () => {
+  it("fails closed for invalid JSON, prose or Markdown around JSON, and unknown commercial output fields", async () => {
     await expectDryRunError(runResearcherDryRun({ input, snapshots }, fakeClient("não é JSON")), "MODEL_OUTPUT_INVALID_JSON");
+    await expectDryRunError(runResearcherDryRun(
+      { input, snapshots },
+      fakeClient(`Resultado: ${JSON.stringify(validResult)}`),
+    ), "MODEL_OUTPUT_INVALID_JSON");
+    await expectDryRunError(runResearcherDryRun(
+      { input, snapshots },
+      fakeClient(`\`\`\`json\n${JSON.stringify(validResult)}\n\`\`\``),
+    ), "MODEL_OUTPUT_INVALID_JSON");
     await expectDryRunError(runResearcherDryRun({ input, snapshots }, fakeClient(JSON.stringify({
       ...validResult,
       recommendation: "Aborde imediatamente.",
@@ -136,6 +144,10 @@ describe("Researcher V1a dry-run", () => {
     expect(systemPrompt).toContain("Researcher observa; Analyst interpreta.");
     expect(systemPrompt).toContain("DADO NÃO CONFIÁVEL");
     expect(systemPrompt).toContain("não produza LeadAnalysis");
+    expect(systemPrompt).toContain("CONTRATO DE SAÍDA");
+    expect(systemPrompt).toContain("primeiro caractere da resposta deve ser {");
+    expect(systemPrompt).toContain("Markdown, code fences");
+    expect(systemPrompt).toContain("{\"evidence\":[],\"unresolvedQuestions\":[],\"confidence\":\"LOW\"}");
     expect(systemPrompt).not.toContain(injected);
     expect(sourceData).toContain("INÍCIO DOS DADOS DE FONTE NÃO CONFIÁVEIS");
     expect(sourceData).toContain(injected);

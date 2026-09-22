@@ -58,7 +58,9 @@ export function buildResearcherSystemPrompt() {
     "Não são observações aceitáveis: 'O site é ruim.', 'É um ótimo lead.', 'A empresa precisa de uma landing page.', 'Devemos abordar imediatamente.', 'Merece score 9.'",
     "Quando algo não puder ser confirmado, registre em unresolvedQuestions; ausência de confirmação não é confirmação de ausência.",
     "confidence mede apenas a qualidade e suficiência da pesquisa realizada, nunca o valor comercial do lead e nunca LeadAnalysis.confidence.",
-    "Retorne somente JSON válido, sem Markdown, com exatamente evidence, unresolvedQuestions e confidence.",
+    "CONTRATO DE SAÍDA: retorne exatamente um objeto JSON válido com somente evidence, unresolvedQuestions e confidence.",
+    "Não escreva prosa, explicações, Markdown, code fences ou comentários antes ou depois do objeto. O primeiro caractere da resposta deve ser { e o último deve ser }.",
+    "Exemplo mínimo válido: {\"evidence\":[],\"unresolvedQuestions\":[],\"confidence\":\"LOW\"}.",
   ].join("\n");
 }
 
