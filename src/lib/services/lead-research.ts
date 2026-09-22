@@ -1,8 +1,11 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { AgentActor, AnalysisConfidence, EvidenceSourceType } from "@/generated/prisma/enums";
 import { db } from "@/lib/db";
+import { maxLeadResearchEvidences } from "@/lib/lead-research-limits";
 import { leadAnalysisSchema, leadEvidenceSchema } from "@/lib/validation";
 import { ServiceNotFoundError } from "./errors";
+
+export { maxLeadResearchEvidences };
 
 export type LeadEvidenceInput = {
   sourceType: EvidenceSourceType;
@@ -19,8 +22,6 @@ export type LeadAnalysisInput = {
   demoConcept?: string;
   confidence: AnalysisConfidence;
 };
-
-export const maxLeadResearchEvidences = 20;
 
 /**
  * The shared, bounded research shape for both CRM services and MCP reads.
