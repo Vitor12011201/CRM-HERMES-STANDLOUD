@@ -170,6 +170,23 @@ describe("Researcher V1a dry-run", () => {
     }))), "MODEL_OUTPUT_INVALID_RESULT");
   });
 
+  it("requires each evidence item to be a strict provenance object", async () => {
+    await expectDryRunError(runResearcherDryRun({ input, snapshots }, fakeClient(JSON.stringify({
+      ...validResult,
+      evidence: ["A primeira seção não apresenta CTA de orçamento visível."],
+    }))), "MODEL_OUTPUT_INVALID_RESULT");
+    await expect(runResearcherDryRun({ input, snapshots }, fakeClient(JSON.stringify(validResult))))
+      .resolves.toEqual(validResult);
+    await expectDryRunError(runResearcherDryRun({ input, snapshots }, fakeClient(JSON.stringify({
+      ...validResult,
+      evidence: [{ ...validResult.evidence[0], sourceUrl: null }],
+    }))), "MODEL_OUTPUT_INVALID_RESULT");
+    await expectDryRunError(runResearcherDryRun({ input, snapshots }, fakeClient(JSON.stringify({
+      ...validResult,
+      evidence: [{ ...validResult.evidence[0], extra: "not allowed" }],
+    }))), "MODEL_OUTPUT_INVALID_RESULT");
+  });
+
   it("retries once only when the first model output is not valid JSON", async () => {
     const invalidOutput = "Resposta fora do contrato";
     const client = fakeClient(invalidOutput, JSON.stringify(validResult));
@@ -234,6 +251,14 @@ describe("Researcher V1a dry-run", () => {
     expect(systemPrompt).toContain("primeiro caractere da resposta deve ser {");
     expect(systemPrompt).toContain("Markdown, code fences");
     expect(systemPrompt).toContain("{\"evidence\":[],\"unresolvedQuestions\":[],\"confidence\":\"LOW\"}");
+    expect(systemPrompt).toContain('EACH ITEM IN "evidence" MUST BE AN OBJECT');
+    expect(systemPrompt).toContain('Never return "evidence": ["text"]');
+    expect(systemPrompt).toContain("sourceType, optional sourceUrl, and observation");
+    expect(systemPrompt).toContain("Omit sourceUrl when that snapshot has no URL");
+    expect(systemPrompt).toContain("never use null");
+    expect(systemPrompt).toContain("\"sourceType\":\"WEBSITE\"");
+    expect(systemPrompt).toContain("\"sourceUrl\":\"https://example.com/company\"");
+    expect(systemPrompt).toContain("\"sourceType\":\"GOOGLE_MAPS\",\"observation\"");
     expect(systemPrompt).not.toContain(injected);
     expect(sourceData).toContain("INÍCIO DOS DADOS DE FONTE NÃO CONFIÁVEIS");
     expect(sourceData).toContain(injected);

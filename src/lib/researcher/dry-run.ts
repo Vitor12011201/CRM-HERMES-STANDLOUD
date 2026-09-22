@@ -87,6 +87,10 @@ export function buildResearcherSystemPrompt() {
     "CONTRATO DE SAÍDA: retorne exatamente um objeto JSON válido com somente evidence, unresolvedQuestions e confidence.",
     "Não escreva prosa, explicações, Markdown, code fences ou comentários antes ou depois do objeto. O primeiro caractere da resposta deve ser { e o último deve ser }.",
     "Exemplo mínimo válido: {\"evidence\":[],\"unresolvedQuestions\":[],\"confidence\":\"LOW\"}.",
+    "EACH ITEM IN \"evidence\" MUST BE AN OBJECT. Never return \"evidence\": [\"text\"].",
+    "Each evidence object must contain sourceType, optional sourceUrl, and observation. sourceType must be WEBSITE, GOOGLE_MAPS, INSTAGRAM, FACEBOOK, LINKEDIN, or OTHER. observation must be a factual observation.",
+    "sourceUrl must be an http(s) URL from the supplied snapshot when present. Omit sourceUrl when that snapshot has no URL; never use null and never invent a URL.",
+    "Complete valid example: {\"evidence\":[{\"sourceType\":\"WEBSITE\",\"sourceUrl\":\"https://example.com/company\",\"observation\":\"The page presents a contact form.\"},{\"sourceType\":\"GOOGLE_MAPS\",\"observation\":\"The scenario records 8 reviews.\"}],\"unresolvedQuestions\":[\"The average rating could not be confirmed.\"],\"confidence\":\"LOW\"}.",
   ].join("\n");
 }
 
