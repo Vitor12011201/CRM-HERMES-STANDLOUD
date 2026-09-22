@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth/api";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { paymentSchema } from "@/lib/validation";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -9,6 +9,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id: projectId } = await params;
   const parsed = paymentSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Revise os campos destacados.", fields: parsed.error.flatten().fieldErrors }, { status: 400 });
+  const db = getDb();
   const project = await db.project.findUnique({ where: { id: projectId }, include: { payments: true } });
   if (!project) return NextResponse.json({ error: "Projeto não encontrado." }, { status: 404 });
   const received = project.payments.reduce((sum, payment) => sum + payment.amountCents, 0);

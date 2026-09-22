@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { requirePageSession } from "@/lib/auth/server";
 import { getFinancialTotals, getOutstandingAmountCents, getReceivedAmountCents } from "@/lib/finance";
 import { formatCurrency, formatDate } from "@/lib/format";
@@ -9,6 +9,7 @@ import { ProjectStatusBadge } from "@/components/Badges";
 
 export default async function FinancePage() {
   await requirePageSession();
+  const db = getDb();
   const [projects, leads] = await Promise.all([db.project.findMany({ include: { payments: { orderBy: { paidAt: "desc" } } }, orderBy: { updatedAt: "desc" } }), db.lead.findMany({ select: { id: true, companyName: true }, orderBy: { companyName: "asc" } })]);
   const validProjects = projects.filter((project) => project.status !== "CANCELLED");
   const totals = getFinancialTotals(validProjects);

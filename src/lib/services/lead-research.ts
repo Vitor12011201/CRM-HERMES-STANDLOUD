@@ -1,6 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { AgentActor, AnalysisConfidence, EvidenceSourceType } from "@/generated/prisma/enums";
-import { db } from "@/lib/db";
+import { getDb, type DbClient } from "@/lib/db";
 import { maxLeadResearchEvidences } from "@/lib/lead-research-limits";
 import { leadAnalysisSchema, leadEvidenceSchema } from "@/lib/validation";
 import { ServiceNotFoundError } from "./errors";
@@ -81,7 +81,7 @@ export function toLeadResearchOutput(research: LeadResearchSelectionResult) {
   };
 }
 
-async function requireLead(leadId: string) {
+async function requireLead(db: DbClient, leadId: string) {
   const lead = await db.lead.findUnique({ where: { id: leadId } });
   if (!lead) throw new ServiceNotFoundError("Lead");
   return lead;
@@ -91,10 +91,11 @@ export async function addLeadEvidence(
   leadId: string,
   input: LeadEvidenceInput,
   options: { capturedBy?: AgentActor } = {},
+  db: DbClient = getDb(),
 ) {
   const { observedAt, ...evidenceInput } = input;
   const parsed = leadEvidenceSchema.parse(evidenceInput);
-  await requireLead(leadId);
+  await requireLead(db, leadId);
   return db.leadEvidence.create({
     data: {
       leadId,
@@ -113,6 +114,7 @@ export async function addLeadEvidence(
  */
 export async function listLeadEvidenceForDuplicateDetection(
   leadId: string,
+  db: DbClient = getDb(),
 ): Promise<LeadEvidenceDuplicateRecord[]> {
   return db.leadEvidence.findMany({
     where: { leadId },
@@ -129,9 +131,10 @@ export async function upsertLeadAnalysis(
   leadId: string,
   input: LeadAnalysisInput,
   options: { updatedBy?: AgentActor } = {},
+  db: DbClient = getDb(),
 ) {
   const parsed = leadAnalysisSchema.parse(input);
-  await requireLead(leadId);
+  await requireLead(db, leadId);
   const data = {
     summary: parsed.summary ?? null,
     opportunity: parsed.opportunity ?? null,
@@ -148,6 +151,7 @@ export async function upsertLeadAnalysis(
 }
 
 export async function getLeadResearch(leadId: string) {
+  const db = getDb();
   const lead = await db.lead.findUnique({
     where: { id: leadId },
     select: leadResearchSelection,

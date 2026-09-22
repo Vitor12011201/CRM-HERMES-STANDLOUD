@@ -1,6 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { ActivityChannel, ActivityType, LeadStatus } from "@/generated/prisma/enums";
-import { db } from "@/lib/db";
+import { getDb, type DbClient } from "@/lib/db";
 import { getLeadClassification, leadStatusLabels } from "@/lib/lead";
 import { ServiceNotFoundError } from "./errors";
 import { leadResearchSelection, toLeadResearchOutput } from "./lead-research";
@@ -56,6 +56,7 @@ function toLeadListItem(lead: {
 }
 
 export async function listLeads(filters: LeadListFilters) {
+  const db = getDb();
   const classificationRange = classificationScoreRange(filters.classification);
   const minScore = Math.max(classificationRange.min, filters.minScore ?? 0);
   const maxScore = Math.min(classificationRange.max, filters.maxScore ?? 10);
@@ -89,6 +90,7 @@ export async function listLeads(filters: LeadListFilters) {
 }
 
 export async function getLeadDetail(leadId: string) {
+  const db = getDb();
   const lead = await db.lead.findUnique({
     where: { id: leadId },
     include: {
@@ -108,7 +110,7 @@ export async function getLeadDetail(leadId: string) {
   };
 }
 
-async function requireLead(leadId: string) {
+async function requireLead(db: DbClient, leadId: string) {
   const lead = await db.lead.findUnique({ where: { id: leadId } });
   if (!lead) throw new ServiceNotFoundError("Lead");
   return lead;
@@ -121,8 +123,9 @@ function isContactActivity(type: ActivityType) {
 export async function addLeadActivity(
   leadId: string,
   input: LeadActivityInput,
+  db: DbClient = getDb(),
 ) {
-  await requireLead(leadId);
+  await requireLead(db, leadId);
   const createdAt = input.createdAt ?? new Date();
   const activityData = {
     leadId,
@@ -160,15 +163,17 @@ export async function addLeadActivity(
 export async function addLeadNote(
   leadId: string,
   note: string,
+  db: DbClient = getDb(),
 ) {
-  return addLeadActivity(leadId, { type: "NOTE", note });
+  return addLeadActivity(leadId, { type: "NOTE", note }, db);
 }
 
 export async function setLeadStatus(
   leadId: string,
   status: LeadStatus,
+  db: DbClient = getDb(),
 ): Promise<LeadMutationOutcome<{ status: LeadStatus; changed: boolean }>> {
-  const current = await requireLead(leadId);
+  const current = await requireLead(db, leadId);
   const beforeData = { status: current.status };
   if (current.status === status) {
     return {
@@ -182,7 +187,7 @@ export async function setLeadStatus(
   await addLeadActivity(leadId, {
     type: "STATUS_CHANGE",
     note: `Status alterado de ${leadStatusLabels[current.status]} para ${leadStatusLabels[status]}.`,
-  });
+  }, db);
   return {
     result: { status, changed: true },
     beforeData,
@@ -193,8 +198,9 @@ export async function setLeadStatus(
 export async function setLeadFollowUp(
   leadId: string,
   nextFollowUpAt: Date,
+  db: DbClient = getDb(),
 ): Promise<LeadMutationOutcome<{ nextFollowUpAt: Date; changed: boolean }>> {
-  const current = await requireLead(leadId);
+  const current = await requireLead(db, leadId);
   const beforeValue = current.nextFollowUpAt?.toISOString() ?? null;
   const afterValue = nextFollowUpAt.toISOString();
   if (beforeValue === afterValue) {
@@ -215,8 +221,9 @@ export async function setLeadFollowUp(
 export async function updateLeadQualification(
   leadId: string,
   input: { qualificationScore: number; mainProblem?: string },
+  db: DbClient = getDb(),
 ): Promise<LeadMutationOutcome<{ qualificationScore: number; classification: "A" | "B" | "C"; mainProblem: string | null; changed: boolean }>> {
-  const current = await requireLead(leadId);
+  const current = await requireLead(db, leadId);
   const nextMainProblem = input.mainProblem === undefined ? current.mainProblem : input.mainProblem;
   const changed = current.qualificationScore !== input.qualificationScore || current.mainProblem !== nextMainProblem;
   if (changed) {

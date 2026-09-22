@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth/api";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { leadSchema } from "@/lib/validation";
 
 export async function POST(request: Request) {
@@ -11,6 +11,7 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Revise os campos destacados.", fields: parsed.error.flatten().fieldErrors }, { status: 400 });
   }
+  const db = getDb();
   const lead = await db.lead.create({ data: parsed.data });
   return NextResponse.json({ lead }, { status: 201 });
 }

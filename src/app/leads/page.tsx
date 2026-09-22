@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requirePageSession } from "@/lib/auth/server";
 import type { LeadStatus } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { getLeadClassification, leadStatusLabels, leadStatuses } from "@/lib/lead";
 import { formatDate, isOverdueFollowUp } from "@/lib/format";
 import { ClassificationBadge, StatusBadge } from "@/components/Badges";
@@ -14,6 +14,7 @@ type SearchParams = Promise<{ q?: string; status?: string; classification?: stri
 export default async function LeadsPage({ searchParams }: { searchParams: SearchParams }) {
   await requirePageSession();
   const query = await searchParams;
+  const db = getDb();
   const q = query.q?.trim() ?? "";
   const status = leadStatuses.includes(query.status as LeadStatus) ? query.status as LeadStatus : undefined;
   const segment = query.segment?.trim() || undefined;

@@ -1,7 +1,8 @@
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { getFinancialTotals } from "@/lib/finance";
 
 export async function getFinancialSummary() {
+  const db = getDb();
   const projects = await db.project.findMany({
     where: { status: { not: "CANCELLED" } },
     include: { payments: { select: { amountCents: true } } },

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requirePageSession } from "@/lib/auth/server";
 import type { Lead } from "@/generated/prisma/client";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { getFunnelMetrics } from "@/lib/dashboard";
 import { getFinancialTotals } from "@/lib/finance";
 import { formatCalendarDate, formatCurrency } from "@/lib/format";
@@ -20,6 +20,7 @@ function FollowUpList({ items, empty, overdueList = false }: { items: FollowUpLe
 
 export default async function DashboardPage() {
   await requirePageSession();
+  const db = getDb();
   const [leads, projects] = await Promise.all([db.lead.findMany({ orderBy: { nextFollowUpAt: "asc" } }), db.project.findMany({ include: { payments: true } })]);
   const metrics = getFunnelMetrics(leads);
   const finance = getFinancialTotals(projects.filter((project) => project.status !== "CANCELLED"));

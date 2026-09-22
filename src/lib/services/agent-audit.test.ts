@@ -3,16 +3,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
+  getDb: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
-  db: {
-    agentAuditLog: {
-      create: mocks.create,
-      update: mocks.update,
-    },
-  },
+  getDb: mocks.getDb,
 }));
+
+const database = {
+  agentAuditLog: {
+    create: mocks.create,
+    update: mocks.update,
+  },
+};
 
 import { ServiceNotFoundError } from "./errors";
 import { runAuditedAgentWrite } from "./agent-audit";
@@ -22,6 +25,7 @@ describe("agent audit service", () => {
     vi.clearAllMocks();
     mocks.create.mockResolvedValue({ id: "audit-1" });
     mocks.update.mockResolvedValue({});
+    mocks.getDb.mockReturnValue(database);
   });
 
   it("records a minimal successful write without raw tool input or secrets", async () => {
@@ -53,5 +57,17 @@ describe("agent audit service", () => {
     expect(mocks.update).toHaveBeenLastCalledWith(expect.objectContaining({
       data: { errorMessage: "Lead nao encontrado." },
     }));
+  });
+
+  it("passes one request-scoped client through the audited operation", async () => {
+    await runAuditedAgentWrite(
+      { toolName: "set_lead_status", entityType: "Lead", entityId: "lead-1", action: "SET_STATUS" },
+      async (db) => {
+        expect(db).toBe(database);
+        return { result: {}, beforeData: {}, afterData: {} };
+      },
+    );
+
+    expect(mocks.getDb).toHaveBeenCalledTimes(1);
   });
 });

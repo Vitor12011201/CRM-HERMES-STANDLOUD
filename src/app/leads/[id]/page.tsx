@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { requirePageSession } from "@/lib/auth/server";
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { getLeadClassification } from "@/lib/lead";
+import { createLeadDetailDiagnostics } from "@/lib/lead-detail-diagnostics";
 import { activityChannelLabels, activityTypeLabels, analysisConfidenceLabels, evidenceSourceTypeLabels } from "@/lib/constants";
 import { formatDate, formatDateTime, isOverdueFollowUp } from "@/lib/format";
 import { ClassificationBadge, StatusBadge } from "@/components/Badges";
@@ -24,11 +25,23 @@ function ContactLink({ value, kind }: { value?: string | null; kind: "phone" | "
 }
 
 export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const diagnostics = createLeadDetailDiagnostics();
+  diagnostics.log("LEAD_DETAIL_START");
+  diagnostics.log("SESSION_START");
   await requirePageSession();
+  diagnostics.log("SESSION_OK");
+  diagnostics.log("PARAMS_START");
   const { id } = await params;
+  diagnostics.log("PARAMS_OK", id);
+  diagnostics.log("LEAD_QUERY_START", id);
+  const db = getDb();
   const lead = await db.lead.findUnique({ where: { id }, include: { activities: { orderBy: { createdAt: "desc" } }, projects: { orderBy: { createdAt: "desc" } }, evidences: { orderBy: { observedAt: "desc" } }, analysis: true } });
+  diagnostics.log("LEAD_QUERY_OK", id);
   if (!lead) notFound();
+  diagnostics.log("CLASSIFICATION_START", id);
   const classification = getLeadClassification(lead.qualificationScore);
+  diagnostics.log("CLASSIFICATION_OK", id);
+  diagnostics.log("RENDER_READY", id);
   return <div className="page">
     <Link href="/leads" className="mb-4 inline-flex text-sm font-medium text-brand hover:underline">← Voltar para leads</Link>
     <header className="mb-6 flex flex-col gap-4 border-b border-line pb-5 lg:flex-row lg:items-end lg:justify-between"><div><div className="mb-2 flex flex-wrap gap-2"><ClassificationBadge classification={classification} /><StatusBadge status={lead.status} /></div><h1 className="text-2xl font-semibold tracking-tight text-ink">{lead.companyName}</h1><p className="mt-1 text-sm text-muted">{[lead.city, lead.region, lead.segment].filter(Boolean).join(" · ") || "Empresa em avaliação"}</p></div><div className="flex flex-wrap items-end gap-3"><LeadStatusSelect leadId={lead.id} status={lead.status} /><DeleteLeadButton leadId={lead.id} companyName={lead.companyName} /></div></header>

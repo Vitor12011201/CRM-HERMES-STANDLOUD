@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ findMany: vi.fn() }));
+const mocks = vi.hoisted(() => ({ findMany: vi.fn(), getDb: vi.fn() }));
 
-vi.mock("@/lib/db", () => ({ db: { lead: { findMany: mocks.findMany } } }));
+vi.mock("@/lib/db", () => ({ getDb: mocks.getDb }));
+
+const database = { lead: { findMany: mocks.findMany } };
+mocks.getDb.mockReturnValue(database);
 
 import { getDueFollowUps } from "./dashboard";
 

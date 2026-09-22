@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getPipelineSummary: vi.fn(),
   getFinancialSummary: vi.fn(),
   runAuditedAgentWrite: vi.fn(),
+  auditDatabase: {},
 }));
 
 vi.mock("@/lib/services/leads", () => ({
@@ -54,7 +55,7 @@ function toolText(result: { content: Array<{ type: string; text?: string }> }) {
 describe("STANDLOUD MCP server", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.runAuditedAgentWrite.mockImplementation(async (_details, operation) => (await operation()).result);
+    mocks.runAuditedAgentWrite.mockImplementation(async (_details, operation) => (await operation(mocks.auditDatabase)).result);
     mocks.listLeads.mockResolvedValue([{ id: leadId, companyName: "Lead de teste", classification: "A" }]);
     mocks.getLeadDetail.mockResolvedValue(null);
     mocks.getDueFollowUps.mockResolvedValue({ overdue: [], today: [], upcoming: [] });
@@ -150,10 +151,10 @@ describe("STANDLOUD MCP server", () => {
     await client.callTool({ name: "set_lead_followup", arguments: { leadId, nextFollowUpAt: "2026-09-21" } });
     await client.callTool({ name: "add_lead_note", arguments: { leadId, note: "Nota de teste" } });
 
-    expect(mocks.setLeadStatus).toHaveBeenCalledWith(leadId, "CONTACTED");
-    expect(mocks.updateLeadQualification).toHaveBeenCalledWith(leadId, { qualificationScore: 10, mainProblem: undefined });
-    expect(mocks.setLeadFollowUp).toHaveBeenCalledWith(leadId, new Date("2026-09-21T00:00:00.000Z"));
-    expect(mocks.addLeadNote).toHaveBeenCalledWith(leadId, "Nota de teste");
+    expect(mocks.setLeadStatus).toHaveBeenCalledWith(leadId, "CONTACTED", mocks.auditDatabase);
+    expect(mocks.updateLeadQualification).toHaveBeenCalledWith(leadId, { qualificationScore: 10, mainProblem: undefined }, mocks.auditDatabase);
+    expect(mocks.setLeadFollowUp).toHaveBeenCalledWith(leadId, new Date("2026-09-21T00:00:00.000Z"), mocks.auditDatabase);
+    expect(mocks.addLeadNote).toHaveBeenCalledWith(leadId, "Nota de teste", mocks.auditDatabase);
     expect(mocks.runAuditedAgentWrite).toHaveBeenCalledTimes(4);
     await client.close();
   });

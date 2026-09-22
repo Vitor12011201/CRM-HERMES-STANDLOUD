@@ -127,7 +127,7 @@ export function createStandloudMcpServer() {
   }, async ({ leadId, note }) => runWriteTool("add_lead_note", async () => {
     const result = await runAuditedAgentWrite(
       { toolName: "add_lead_note", entityType: "Lead", entityId: leadId, action: "CREATE_NOTE" },
-      () => addLeadNote(leadId, note),
+      (db) => addLeadNote(leadId, note, db),
     );
     return { ...result, leadId };
   }));
@@ -140,7 +140,7 @@ export function createStandloudMcpServer() {
   }, async ({ leadId, status }) => runWriteTool("set_lead_status", async () => {
     const result = await runAuditedAgentWrite(
       { toolName: "set_lead_status", entityType: "Lead", entityId: leadId, action: "SET_STATUS" },
-      () => setLeadStatus(leadId, status),
+      (db) => setLeadStatus(leadId, status, db),
     );
     return { ...result, leadId };
   }));
@@ -153,7 +153,7 @@ export function createStandloudMcpServer() {
   }, async ({ leadId, nextFollowUpAt }) => runWriteTool("set_lead_followup", async () => {
     const result = await runAuditedAgentWrite(
       { toolName: "set_lead_followup", entityType: "Lead", entityId: leadId, action: "SET_FOLLOW_UP" },
-      () => setLeadFollowUp(leadId, parseMcpFollowUpDate(nextFollowUpAt)),
+      (db) => setLeadFollowUp(leadId, parseMcpFollowUpDate(nextFollowUpAt), db),
     );
     return { ...result, leadId };
   }));
@@ -166,7 +166,7 @@ export function createStandloudMcpServer() {
   }, async ({ leadId, activityType, channel, note }) => runWriteTool("add_lead_activity", async () => {
     const result = await runAuditedAgentWrite(
       { toolName: "add_lead_activity", entityType: "Lead", entityId: leadId, action: "CREATE_ACTIVITY" },
-      () => addLeadActivity(leadId, { type: activityType, channel, note }),
+      (db) => addLeadActivity(leadId, { type: activityType, channel, note }, db),
     );
     return { ...result, leadId };
   }));
@@ -179,7 +179,7 @@ export function createStandloudMcpServer() {
   }, async ({ leadId, qualificationScore, mainProblem }) => runWriteTool("update_lead_qualification", async () => {
     const result = await runAuditedAgentWrite(
       { toolName: "update_lead_qualification", entityType: "Lead", entityId: leadId, action: "UPDATE_QUALIFICATION" },
-      () => updateLeadQualification(leadId, { qualificationScore, mainProblem }),
+      (db) => updateLeadQualification(leadId, { qualificationScore, mainProblem }, db),
     );
     return { ...result, leadId };
   }));

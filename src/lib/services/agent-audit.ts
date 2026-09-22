@@ -1,5 +1,5 @@
 import { AgentActor } from "@/generated/prisma/enums";
-import { db } from "@/lib/db";
+import { getDb, type DbClient } from "@/lib/db";
 import { getSafeServiceErrorMessage } from "./errors";
 
 type AuditDetails = {
@@ -26,8 +26,9 @@ function toAuditJson(value: Record<string, unknown>) {
  */
 export async function runAuditedAgentWrite<T>(
   details: AuditDetails,
-  operation: () => Promise<AuditedOutcome<T>>,
+  operation: (db: DbClient) => Promise<AuditedOutcome<T>>,
 ) {
+  const db = getDb();
   const audit = await db.agentAuditLog.create({
     data: {
       actor: AgentActor.AGENT,
@@ -42,7 +43,7 @@ export async function runAuditedAgentWrite<T>(
   });
 
   try {
-    const outcome = await operation();
+    const outcome = await operation(db);
     await db.agentAuditLog.update({
       where: { id: audit.id },
       data: {

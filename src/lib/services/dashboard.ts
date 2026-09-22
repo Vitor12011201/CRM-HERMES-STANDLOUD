@@ -1,5 +1,5 @@
 import type { LeadStatus } from "@/generated/prisma/enums";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { getFunnelMetrics } from "@/lib/dashboard";
 import { getFollowUpTiming } from "@/lib/business-time";
 import { getLeadClassification, leadStatuses } from "@/lib/lead";
@@ -38,6 +38,7 @@ function summarizePipeline(leads: Array<{ status: LeadStatus; lastContactAt: Dat
 }
 
 export async function getPipelineSummary() {
+  const db = getDb();
   const leads = await db.lead.findMany({
     select: {
       status: true,
@@ -57,6 +58,7 @@ const followUpSelect = {
 } as const;
 
 export async function getDueFollowUps(options: DueFollowUpOptions, reference = new Date()) {
+  const db = getDb();
   const followUps = await db.lead.findMany({
     where: { nextFollowUpAt: { not: null } },
     orderBy: { nextFollowUpAt: "asc" },

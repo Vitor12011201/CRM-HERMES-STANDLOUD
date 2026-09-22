@@ -6,19 +6,22 @@ const mocks = vi.hoisted(() => ({
   leadUpdateMany: vi.fn(),
   leadActivityCreate: vi.fn(),
   transaction: vi.fn(),
+  getDb: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
-  db: {
-    lead: {
-      findUnique: mocks.leadFindUnique,
-      update: mocks.leadUpdate,
-      updateMany: mocks.leadUpdateMany,
-    },
-    leadActivity: { create: mocks.leadActivityCreate },
-    $transaction: mocks.transaction,
-  },
+  getDb: mocks.getDb,
 }));
+
+const database = {
+  lead: {
+    findUnique: mocks.leadFindUnique,
+    update: mocks.leadUpdate,
+    updateMany: mocks.leadUpdateMany,
+  },
+  leadActivity: { create: mocks.leadActivityCreate },
+  $transaction: mocks.transaction,
+};
 
 import { addLeadActivity, getLeadDetail, setLeadStatus } from "./leads";
 
@@ -62,6 +65,7 @@ beforeEach(() => {
   });
   mocks.leadActivityCreate.mockImplementation(async ({ data }) => ({ id: `activity-${++activityNumber}`, ...data }));
   mocks.transaction.mockImplementation(async (operations: Promise<unknown>[]) => Promise.all(operations));
+  mocks.getDb.mockReturnValue(database);
 });
 
 describe("lead activity contact consistency", () => {
@@ -255,5 +259,14 @@ describe("lead detail research context", () => {
     detailLead = null;
 
     await expect(getLeadDetail(leadId)).resolves.toBeNull();
+  });
+
+  it("uses one request-scoped client throughout a multi-query status change", async () => {
+    await setLeadStatus(leadId, "CONTACTED");
+
+    expect(mocks.getDb).toHaveBeenCalledTimes(1);
+    expect(mocks.leadFindUnique).toHaveBeenCalledTimes(2);
+    expect(mocks.leadUpdate).toHaveBeenCalledTimes(1);
+    expect(mocks.leadActivityCreate).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth/api";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { leadSchema } from "@/lib/validation";
 import { leadStatusLabels } from "@/lib/lead";
 import { addLeadActivity } from "@/lib/services/leads";
@@ -13,6 +13,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const parsed = leadSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "Revise os campos destacados.", fields: parsed.error.flatten().fieldErrors }, { status: 400 });
 
+  const db = getDb();
   const current = await db.lead.findUnique({ where: { id }, select: { status: true } });
   if (!current) return NextResponse.json({ error: "Lead não encontrado." }, { status: 404 });
 
@@ -20,7 +21,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     // The D1 Prisma adapter currently does not provide transaction guarantees.
     // Persist the primary edit first, then write its audit activity.
     const lead = await db.lead.update({ where: { id }, data: parsed.data });
-    await addLeadActivity(id, { type: "STATUS_CHANGE", note: `Status alterado de ${leadStatusLabels[current.status]} para ${leadStatusLabels[parsed.data.status]}.` });
+    await addLeadActivity(id, { type: "STATUS_CHANGE", note: `Status alterado de ${leadStatusLabels[current.status]} para ${leadStatusLabels[parsed.data.status]}.` }, db);
     return NextResponse.json({ lead });
   }
   const lead = await db.lead.update({ where: { id }, data: parsed.data });
@@ -31,6 +32,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   const unauthorized = await requireApiSession();
   if (unauthorized) return unauthorized;
   const { id } = await params;
+  const db = getDb();
   try {
     await db.lead.delete({ where: { id } });
     return new NextResponse(null, { status: 204 });

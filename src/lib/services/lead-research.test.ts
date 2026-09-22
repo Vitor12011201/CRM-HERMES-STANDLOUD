@@ -8,19 +8,22 @@ const mocks = vi.hoisted(() => ({
   evidenceFindMany: vi.fn(),
   evidenceCreate: vi.fn(),
   analysisUpsert: vi.fn(),
+  getDb: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
-  db: {
-    lead: {
-      findUnique: mocks.leadFindUnique,
-      update: mocks.leadUpdate,
-      updateMany: mocks.leadUpdateMany,
-    },
-    leadEvidence: { create: mocks.evidenceCreate, findMany: mocks.evidenceFindMany },
-    leadAnalysis: { upsert: mocks.analysisUpsert },
-  },
+  getDb: mocks.getDb,
 }));
+
+const database = {
+  lead: {
+    findUnique: mocks.leadFindUnique,
+    update: mocks.leadUpdate,
+    updateMany: mocks.leadUpdateMany,
+  },
+  leadEvidence: { create: mocks.evidenceCreate, findMany: mocks.evidenceFindMany },
+  leadAnalysis: { upsert: mocks.analysisUpsert },
+};
 
 import { addLeadEvidence, getLeadResearch, upsertLeadAnalysis } from "./lead-research";
 
@@ -39,6 +42,7 @@ beforeEach(() => {
   });
   mocks.evidenceCreate.mockImplementation(async ({ data }) => ({ id: "evidence-1", ...data }));
   mocks.evidenceFindMany.mockResolvedValue([]);
+  mocks.getDb.mockReturnValue(database);
   mocks.analysisUpsert.mockImplementation(async ({ create, update }) => {
     storedAnalysis = storedAnalysis ? { ...storedAnalysis, ...update } : { id: "analysis-1", ...create };
     return storedAnalysis;
