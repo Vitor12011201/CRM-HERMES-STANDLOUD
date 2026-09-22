@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   leadFindUnique: vi.fn(),
   leadUpdate: vi.fn(),
   leadUpdateMany: vi.fn(),
+  evidenceFindMany: vi.fn(),
   evidenceCreate: vi.fn(),
   analysisUpsert: vi.fn(),
 }));
@@ -16,7 +17,7 @@ vi.mock("@/lib/db", () => ({
       update: mocks.leadUpdate,
       updateMany: mocks.leadUpdateMany,
     },
-    leadEvidence: { create: mocks.evidenceCreate },
+    leadEvidence: { create: mocks.evidenceCreate, findMany: mocks.evidenceFindMany },
     leadAnalysis: { upsert: mocks.analysisUpsert },
   },
 }));
@@ -37,6 +38,7 @@ beforeEach(() => {
     return { id: leadId, qualificationScore: 8, status: "CONTACTED", lastContactAt: new Date("2026-09-20T12:00:00.000Z"), nextFollowUpAt: new Date("2026-09-22T00:00:00.000Z") };
   });
   mocks.evidenceCreate.mockImplementation(async ({ data }) => ({ id: "evidence-1", ...data }));
+  mocks.evidenceFindMany.mockResolvedValue([]);
   mocks.analysisUpsert.mockImplementation(async ({ create, update }) => {
     storedAnalysis = storedAnalysis ? { ...storedAnalysis, ...update } : { id: "analysis-1", ...create };
     return storedAnalysis;
@@ -66,6 +68,30 @@ describe("lead research services", () => {
     expect(mocks.evidenceCreate).toHaveBeenCalledTimes(1);
     expect(mocks.leadUpdate).not.toHaveBeenCalled();
     expect(mocks.leadUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("lists every factual field needed for exact duplicate detection without using the capped UI read", async () => {
+    mocks.evidenceFindMany.mockResolvedValue([
+      {
+        sourceType: "WEBSITE",
+        sourceUrl: null,
+        observation: "A página apresenta um formulário de contato.",
+      },
+    ]);
+
+    const { listLeadEvidenceForDuplicateDetection } = await import("./lead-research");
+    await expect(listLeadEvidenceForDuplicateDetection(leadId)).resolves.toEqual([
+      {
+        sourceType: "WEBSITE",
+        sourceUrl: null,
+        observation: "A página apresenta um formulário de contato.",
+      },
+    ]);
+    expect(mocks.evidenceFindMany).toHaveBeenCalledWith({
+      where: { leadId },
+      select: { sourceType: true, sourceUrl: true, observation: true },
+      orderBy: { observedAt: "asc" },
+    });
   });
 
   it("fails with a not-found error before persisting research for a missing lead", async () => {

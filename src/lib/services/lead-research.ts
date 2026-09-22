@@ -15,6 +15,18 @@ export type LeadEvidenceInput = {
   observedAt?: Date;
 };
 
+/**
+ * Factual fields needed to detect an exact stored-evidence duplicate. This is
+ * intentionally unbounded: a capped UI/read model must not miss an older
+ * duplicate during an approved import.
+ */
+export type LeadEvidenceDuplicateRecord = Pick<
+  LeadEvidenceInput,
+  "sourceType" | "observation"
+> & {
+  sourceUrl: string | null;
+};
+
 export type LeadAnalysisInput = {
   summary?: string;
   opportunity?: string;
@@ -92,6 +104,24 @@ export async function addLeadEvidence(
       observedAt: observedAt ?? new Date(),
       capturedBy: options.capturedBy ?? "USER",
     },
+  });
+}
+
+/**
+ * Internal persistence support for exact duplicate detection. It deliberately
+ * returns only factual fields and does not expose a write path.
+ */
+export async function listLeadEvidenceForDuplicateDetection(
+  leadId: string,
+): Promise<LeadEvidenceDuplicateRecord[]> {
+  return db.leadEvidence.findMany({
+    where: { leadId },
+    select: {
+      sourceType: true,
+      sourceUrl: true,
+      observation: true,
+    },
+    orderBy: { observedAt: "asc" },
   });
 }
 
