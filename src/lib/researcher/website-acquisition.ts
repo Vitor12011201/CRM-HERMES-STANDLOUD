@@ -10,6 +10,11 @@ import {
 export const maxWebsiteRedirects = 3;
 export const websiteAcquisitionTimeoutMs = 10_000;
 export const maxWebsiteResponseBytes = 1_048_576;
+export const maxWebsiteJsonLdBlocks = 5;
+export const maxWebsiteJsonLdEntities = 20;
+export const maxWebsiteSourceFieldLength = 500;
+export const maxWebsiteMetadataSectionLength = 2_000;
+export const maxWebsiteStructuredDataSectionLength = 4_000;
 
 const acceptedContentTypes = new Set(["text/html", "text/plain"]);
 const blockedHostnameSuffixes = [".localhost", ".local", ".localdomain", ".internal"];
@@ -220,6 +225,213 @@ function normalizeVisibleText(value: string): string {
     .trim();
 }
 
+function limitedSourceText(value: string): string | undefined {
+  const normalized = normalizeVisibleText(value).slice(0, maxWebsiteSourceFieldLength);
+  return normalized || undefined;
+}
+
+function getHtmlAttribute(attributes: string, name: string): string | undefined {
+  const expression = new RegExp(
+    "\\b" + name + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))",
+    "i",
+  );
+  const match = expression.exec(attributes);
+  return match?.[1] ?? match?.[2] ?? match?.[3];
+}
+
+const allowedMetadataFields = [
+  { attribute: "name", value: "description", label: "Description" },
+  { attribute: "property", value: "og:title", label: "OpenGraph Title" },
+  { attribute: "property", value: "og:description", label: "OpenGraph Description" },
+  { attribute: "property", value: "og:url", label: "OpenGraph URL" },
+] as const;
+
+function extractMetadata(html: string): string[] {
+  const head = /<head\b[^>]*>([\s\S]*?)<\/head\s*>/i.exec(html)?.[1] ?? "";
+  const values = new Map<string, string>();
+  const metaPattern = /<meta\b([^>]*)>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = metaPattern.exec(head))) {
+    const attributes = match[1];
+    const content = getHtmlAttribute(attributes, "content");
+    if (!content) continue;
+
+    for (const field of allowedMetadataFields) {
+      const attributeValue = getHtmlAttribute(attributes, field.attribute);
+      if (attributeValue?.toLowerCase() !== field.value || values.has(field.label)) continue;
+
+      const value = limitedSourceText(content);
+      if (value) values.set(field.label, value);
+    }
+  }
+
+  return allowedMetadataFields.flatMap(({ label }) => {
+    const value = values.get(label);
+    return value ? [`${label}: ${value}`] : [];
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringValues(value: unknown): string[] {
+  const values = Array.isArray(value) ? value : [value];
+  const unique = new Set<string>();
+
+  for (const entry of values) {
+    if (typeof entry !== "string") continue;
+    const normalized = limitedSourceText(entry);
+    if (normalized) unique.add(normalized);
+  }
+
+  return [...unique].slice(0, 5);
+}
+
+function joinSourceValues(values: string[]): string | undefined {
+  const joined = values.join(", ").slice(0, maxWebsiteSourceFieldLength);
+  return joined || undefined;
+}
+
+function collectJsonLdEntities(value: unknown, entities: Record<string, unknown>[]): void {
+  if (entities.length >= maxWebsiteJsonLdEntities) return;
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      collectJsonLdEntities(entry, entities);
+      if (entities.length >= maxWebsiteJsonLdEntities) return;
+    }
+    return;
+  }
+
+  if (!isRecord(value)) return;
+
+  const graph = value["@graph"];
+  const ownEntity = { ...value };
+  delete ownEntity["@graph"];
+  if (Object.keys(ownEntity).length > 0) entities.push(ownEntity);
+
+  if (graph !== undefined) collectJsonLdEntities(graph, entities);
+}
+
+function extractAddress(value: unknown): string | undefined {
+  const records = Array.isArray(value) ? value : [value];
+  const addresses = records.flatMap((entry) => {
+    if (typeof entry === "string") return stringValues(entry);
+    if (!isRecord(entry)) return [];
+
+    const parts = [
+      ["streetAddress", "Street address"],
+      ["addressLocality", "Locality"],
+      ["addressRegion", "Region"],
+      ["postalCode", "Postal code"],
+      ["addressCountry", "Country"],
+    ].flatMap(([field, label]) => {
+      const text = joinSourceValues(stringValues(entry[field]));
+      return text ? [`${label}: ${text}`] : [];
+    });
+
+    return parts.length > 0 ? [parts.join("; ")] : [];
+  });
+
+  return joinSourceValues(addresses);
+}
+
+function extractAreaServed(value: unknown): string | undefined {
+  const values = (Array.isArray(value) ? value : [value]).flatMap((entry) => {
+    if (typeof entry === "string") return stringValues(entry);
+    if (!isRecord(entry)) return [];
+    return stringValues(entry.name);
+  });
+  return joinSourceValues(values);
+}
+
+function extractOpeningHoursSpecification(value: unknown): string | undefined {
+  const specifications = (Array.isArray(value) ? value : [value]).flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+
+    const parts = [
+      ["dayOfWeek", "Day"],
+      ["opens", "Opens"],
+      ["closes", "Closes"],
+    ].flatMap(([field, label]) => {
+      const text = joinSourceValues(stringValues(entry[field]));
+      return text ? [`${label}: ${text}`] : [];
+    });
+
+    return parts.length > 0 ? [parts.join("; ")] : [];
+  });
+
+  return joinSourceValues(specifications);
+}
+
+function extractStructuredEntity(entity: Record<string, unknown>): string[] {
+  const lines: string[] = [];
+  const scalarFields = [
+    ["@type", "Type"],
+    ["name", "Name"],
+    ["description", "Description"],
+    ["url", "URL"],
+    ["telephone", "Telephone"],
+    ["email", "Email"],
+    ["openingHours", "Opening hours"],
+    ["sameAs", "Same as"],
+  ] as const;
+
+  for (const [field, label] of scalarFields) {
+    const text = joinSourceValues(stringValues(entity[field]));
+    if (text) lines.push(`${label}: ${text}`);
+  }
+
+  const address = extractAddress(entity.address);
+  if (address) lines.push(`Address: ${address}`);
+
+  const areaServed = extractAreaServed(entity.areaServed);
+  if (areaServed) lines.push(`Area served: ${areaServed}`);
+
+  const openingHoursSpecification = extractOpeningHoursSpecification(entity.openingHoursSpecification);
+  if (openingHoursSpecification) lines.push(`Opening hours specification: ${openingHoursSpecification}`);
+
+  return lines;
+}
+
+function extractJsonLd(html: string): string[] {
+  const scripts = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi;
+  const lines: string[] = [];
+  let processedBlocks = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = scripts.exec(html)) && processedBlocks < maxWebsiteJsonLdBlocks) {
+    const type = getHtmlAttribute(match[1], "type")?.toLowerCase();
+    if (type !== "application/ld+json") continue;
+    processedBlocks += 1;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(match[2]);
+    } catch {
+      continue;
+    }
+
+    const entities: Record<string, unknown>[] = [];
+    collectJsonLdEntities(parsed, entities);
+    for (const entity of entities) {
+      lines.push(...extractStructuredEntity(entity));
+      if (lines.join("\n").length >= maxWebsiteStructuredDataSectionLength) {
+        return lines;
+      }
+    }
+  }
+
+  return lines;
+}
+
+function section(label: string, lines: string[]): string | undefined {
+  const content = lines.join("\n").trim();
+  return content ? `[${label}]\n${content}` : undefined;
+}
+
 function extractTitle(html: string): string | undefined {
   const match = /<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(html);
   if (!match) return undefined;
@@ -230,15 +442,26 @@ function extractTitle(html: string): string | undefined {
 
 function extractWebsiteText(body: string, contentType: string): { title?: string; content: string } {
   if (contentType === "text/plain") {
-    return { content: body.replace(/\s+/g, " ").trim().slice(0, maxResearchSourceSnapshotContentLength) };
+    const visibleContent = body.replace(/\s+/g, " ").trim();
+    const content = section("VISIBLE CONTENT", visibleContent ? [visibleContent] : [])
+      ?.slice(0, maxResearchSourceSnapshotContentLength) ?? "";
+    return { content };
   }
 
   const title = extractTitle(body);
+  const metadata = extractMetadata(body);
+  const structuredData = extractJsonLd(body);
   const visibleHtml = body
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<(script|style|noscript|head|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
     .replace(/<(script|style|noscript|template)\b[^>]*\/>/gi, " ");
-  const content = normalizeVisibleText(visibleHtml).slice(0, maxResearchSourceSnapshotContentLength);
+  const visibleContent = normalizeVisibleText(visibleHtml);
+  const content = [
+    section("VISIBLE CONTENT", visibleContent ? [visibleContent] : []),
+    section("METADATA", metadata)?.slice(0, maxWebsiteMetadataSectionLength),
+    section("STRUCTURED DATA / JSON-LD", structuredData)?.slice(0, maxWebsiteStructuredDataSectionLength),
+  ].filter((value): value is string => Boolean(value)).join("\n\n")
+    .slice(0, maxResearchSourceSnapshotContentLength);
 
   return { ...(title ? { title } : {}), content };
 }
@@ -253,8 +476,9 @@ function getTimeoutMs(timeoutMs: number | undefined): number {
 
 /**
  * Deterministically acquires one public textual website into untrusted source
- * data. It performs no model call, database write, browser rendering, or
- * semantic interpretation.
+ * data. Visible content, allowlisted metadata, and allowlisted JSON-LD remain
+ * explicitly labeled source data and are never executed. It performs no model
+ * call, database write, browser rendering, or semantic interpretation.
  */
 export async function acquireWebsiteSnapshot(
   request: WebsiteAcquisitionRequest,
