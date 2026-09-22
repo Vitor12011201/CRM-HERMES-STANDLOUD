@@ -44,6 +44,32 @@ export class ResearcherDryRunError extends Error {
   }
 }
 
+const singleJsonFencePattern = /^```json\r?\n([\s\S]*)\r?\n```$/;
+
+/**
+ * Removes only one complete outer ```json fence. This intentionally never
+ * searches for, extracts, repairs, or otherwise recovers JSON from prose.
+ */
+export function normalizeStrictJsonEnvelope(output: string): string {
+  const trimmed = output.trim();
+
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    return trimmed;
+  }
+
+  const fenceMatch = singleJsonFencePattern.exec(trimmed);
+  if (!fenceMatch) {
+    throw new ResearcherDryRunError("MODEL_OUTPUT_INVALID_JSON");
+  }
+
+  const fencedContent = fenceMatch[1].trim();
+  if (!fencedContent.startsWith("{") || !fencedContent.endsWith("}")) {
+    throw new ResearcherDryRunError("MODEL_OUTPUT_INVALID_JSON");
+  }
+
+  return fencedContent;
+}
+
 /**
  * Instructions are deliberately separate from source data. The Researcher
  * observes; the Analyst interprets. It must return JSON only.
@@ -62,6 +88,15 @@ export function buildResearcherSystemPrompt() {
     "Não escreva prosa, explicações, Markdown, code fences ou comentários antes ou depois do objeto. O primeiro caractere da resposta deve ser { e o último deve ser }.",
     "Exemplo mínimo válido: {\"evidence\":[],\"unresolvedQuestions\":[],\"confidence\":\"LOW\"}.",
   ].join("\n");
+}
+
+export function buildResearcherFormatRetryInstruction() {
+  return [
+    "Sua resposta anterior não respeitou o contrato de formato.",
+    "Retorne exatamente um único objeto JSON válido.",
+    "Não use Markdown, code fences ou prosa antes ou depois do objeto.",
+    "O primeiro caractere deve ser { e o último deve ser }.",
+  ].join(" ");
 }
 
 /** Source data is sent as data, in a separate user message, never interpolated into system instructions. */
@@ -95,7 +130,7 @@ function parseSnapshots(snapshots: unknown, input: ResearcherInput) {
 function parseModelResult(output: string) {
   let json: unknown;
   try {
-    json = JSON.parse(output);
+    json = JSON.parse(normalizeStrictJsonEnvelope(output));
   } catch {
     throw new ResearcherDryRunError("MODEL_OUTPUT_INVALID_JSON");
   }
@@ -103,6 +138,49 @@ function parseModelResult(output: string) {
   const parsed = researcherResultSchema.safeParse(json);
   if (!parsed.success) throw new ResearcherDryRunError("MODEL_OUTPUT_INVALID_RESULT");
   return parsed.data;
+}
+
+function buildModelRequest(
+  input: ResearcherInput,
+  snapshots: ResearchSourceSnapshot[],
+  retryForFormat: boolean,
+): ResearcherModelRequest {
+  const systemPrompt = retryForFormat
+    ? `${buildResearcherSystemPrompt()}\n${buildResearcherFormatRetryInstruction()}`
+    : buildResearcherSystemPrompt();
+
+  return {
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: buildResearcherSourceDataMessage(input, snapshots) },
+    ],
+    responseFormat: "json",
+  };
+}
+
+async function requestModelOutput(
+  modelClient: ResearcherModelClient,
+  request: ResearcherModelRequest,
+): Promise<string> {
+  try {
+    return await modelClient.complete(request);
+  } catch {
+    throw new ResearcherDryRunError("MODEL_REQUEST_FAILED");
+  }
+}
+
+function validateModelOutput(
+  output: string,
+  input: ResearcherInput,
+  snapshots: ResearchSourceSnapshot[],
+): ResearcherResult {
+  if (typeof output !== "string") {
+    throw new ResearcherDryRunError("MODEL_OUTPUT_INVALID_RESULT");
+  }
+
+  const result = parseModelResult(output);
+  validateResearcherResultProvenance(result, input, snapshots);
+  return result;
 }
 
 /**
@@ -141,23 +219,23 @@ export async function runResearcherDryRun(
 ): Promise<ResearcherResult> {
   const input = parseInput(request.input);
   const snapshots = parseSnapshots(request.snapshots, input);
-  const modelRequest: ResearcherModelRequest = {
-    messages: [
-      { role: "system", content: buildResearcherSystemPrompt() },
-      { role: "user", content: buildResearcherSourceDataMessage(input, snapshots) },
-    ],
-    responseFormat: "json",
-  };
 
-  let output: string;
+  const initialOutput = await requestModelOutput(
+    modelClient,
+    buildModelRequest(input, snapshots, false),
+  );
+
   try {
-    output = await modelClient.complete(modelRequest);
-  } catch {
-    throw new ResearcherDryRunError("MODEL_REQUEST_FAILED");
+    return validateModelOutput(initialOutput, input, snapshots);
+  } catch (error) {
+    if (!(error instanceof ResearcherDryRunError) || error.code !== "MODEL_OUTPUT_INVALID_JSON") {
+      throw error;
+    }
   }
 
-  if (typeof output !== "string") throw new ResearcherDryRunError("MODEL_OUTPUT_INVALID_RESULT");
-  const result = parseModelResult(output);
-  validateResearcherResultProvenance(result, input, snapshots);
-  return result;
+  const retryOutput = await requestModelOutput(
+    modelClient,
+    buildModelRequest(input, snapshots, true),
+  );
+  return validateModelOutput(retryOutput, input, snapshots);
 }

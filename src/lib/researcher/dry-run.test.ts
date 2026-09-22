@@ -9,7 +9,9 @@ import {
 } from "./contracts";
 import {
   buildResearcherSourceDataMessage,
+  buildResearcherFormatRetryInstruction,
   buildResearcherSystemPrompt,
+  normalizeStrictJsonEnvelope,
   ResearcherDryRunError,
   runResearcherDryRun,
   type ResearcherModelClient,
@@ -46,8 +48,15 @@ const validResult = {
   confidence: "MEDIUM",
 };
 
-function fakeClient(output: string): ResearcherModelClient {
-  return { complete: vi.fn().mockResolvedValue(output) };
+function fakeClient(...outputs: string[]): ResearcherModelClient {
+  const fallback = outputs.at(-1);
+  return {
+    complete: vi.fn().mockImplementation(async () => {
+      const output = outputs.shift() ?? fallback;
+      if (output === undefined) throw new Error("Fake model output is missing");
+      return output;
+    }),
+  };
 }
 
 async function expectDryRunError(promise: Promise<unknown>, code: string) {
@@ -91,7 +100,18 @@ describe("Researcher V1a dry-run", () => {
     expect(request.messages[1].role).toBe("user");
   });
 
-  it("fails closed for invalid JSON, prose or Markdown around JSON, and unknown commercial output fields", async () => {
+  it("accepts only pure JSON or one complete json fence, with optional external whitespace", async () => {
+    const json = JSON.stringify(validResult);
+
+    expect(normalizeStrictJsonEnvelope(` \n${json}\n `)).toBe(json);
+    expect(normalizeStrictJsonEnvelope(`\n\`\`\`json\n${json}\n\`\`\`\n`)).toBe(json);
+    await expect(runResearcherDryRun(
+      { input, snapshots },
+      fakeClient(`\`\`\`json\n${json}\n\`\`\``),
+    )).resolves.toEqual(validResult);
+  });
+
+  it("fails closed for prose, multiple fences, invalid fenced JSON, comments, JSON5, and unknown commercial output fields", async () => {
     await expectDryRunError(runResearcherDryRun({ input, snapshots }, fakeClient("não é JSON")), "MODEL_OUTPUT_INVALID_JSON");
     await expectDryRunError(runResearcherDryRun(
       { input, snapshots },
@@ -99,7 +119,31 @@ describe("Researcher V1a dry-run", () => {
     ), "MODEL_OUTPUT_INVALID_JSON");
     await expectDryRunError(runResearcherDryRun(
       { input, snapshots },
-      fakeClient(`\`\`\`json\n${JSON.stringify(validResult)}\n\`\`\``),
+      fakeClient(`${JSON.stringify(validResult)}\nEspero que ajude.`),
+    ), "MODEL_OUTPUT_INVALID_JSON");
+    await expectDryRunError(runResearcherDryRun(
+      { input, snapshots },
+      fakeClient(`Segue o JSON:\n\`\`\`json\n${JSON.stringify(validResult)}\n\`\`\``),
+    ), "MODEL_OUTPUT_INVALID_JSON");
+    await expectDryRunError(runResearcherDryRun(
+      { input, snapshots },
+      fakeClient(`\`\`\`json\n${JSON.stringify(validResult)}\n\`\`\`\nExplicação depois.`),
+    ), "MODEL_OUTPUT_INVALID_JSON");
+    await expectDryRunError(runResearcherDryRun(
+      { input, snapshots },
+      fakeClient(`\`\`\`json\n${JSON.stringify(validResult)}\n\`\`\`\n\`\`\`json\n${JSON.stringify(validResult)}\n\`\`\``),
+    ), "MODEL_OUTPUT_INVALID_JSON");
+    await expectDryRunError(runResearcherDryRun(
+      { input, snapshots },
+      fakeClient("```json\n{ invalid }\n```"),
+    ), "MODEL_OUTPUT_INVALID_JSON");
+    await expectDryRunError(runResearcherDryRun(
+      { input, snapshots },
+      fakeClient('{"evidence":[],// comment\n"unresolvedQuestions":[],"confidence":"LOW"}'),
+    ), "MODEL_OUTPUT_INVALID_JSON");
+    await expectDryRunError(runResearcherDryRun(
+      { input, snapshots },
+      fakeClient("{evidence: [], unresolvedQuestions: [], confidence: 'LOW'}"),
     ), "MODEL_OUTPUT_INVALID_JSON");
     await expectDryRunError(runResearcherDryRun({ input, snapshots }, fakeClient(JSON.stringify({
       ...validResult,
@@ -124,6 +168,48 @@ describe("Researcher V1a dry-run", () => {
       ...validResult,
       evidence: [validResult.evidence[0], validResult.evidence[0]],
     }))), "MODEL_OUTPUT_INVALID_RESULT");
+  });
+
+  it("retries once only when the first model output is not valid JSON", async () => {
+    const invalidOutput = "Resposta fora do contrato";
+    const client = fakeClient(invalidOutput, JSON.stringify(validResult));
+
+    await expect(runResearcherDryRun({ input, snapshots }, client)).resolves.toEqual(validResult);
+    expect(client.complete).toHaveBeenCalledTimes(2);
+
+    const [firstRequest, retryRequest] = vi.mocked(client.complete).mock.calls.map(([request]) => request);
+    expect(firstRequest.messages[1]).toEqual(retryRequest.messages[1]);
+    expect(retryRequest.messages[0].content).toContain(buildResearcherFormatRetryInstruction());
+    expect(JSON.stringify(retryRequest)).not.toContain(invalidOutput);
+  });
+
+  it("stops after the second invalid JSON output", async () => {
+    const client = fakeClient("inválido 1", "inválido 2");
+
+    await expectDryRunError(runResearcherDryRun({ input, snapshots }, client), "MODEL_OUTPUT_INVALID_JSON");
+    expect(client.complete).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry valid JSON that fails Zod or provenance validation", async () => {
+    const zodInvalid = fakeClient(JSON.stringify({ ...validResult, recommendation: "Aborde imediatamente." }));
+    const provenanceInvalid = fakeClient(JSON.stringify({
+      ...validResult,
+      evidence: [{ ...validResult.evidence[0], sourceUrl: "https://inventada.example" }],
+    }));
+
+    await expectDryRunError(runResearcherDryRun({ input, snapshots }, zodInvalid), "MODEL_OUTPUT_INVALID_RESULT");
+    await expectDryRunError(runResearcherDryRun({ input, snapshots }, provenanceInvalid), "MODEL_OUTPUT_INVALID_PROVENANCE");
+    expect(zodInvalid.complete).toHaveBeenCalledTimes(1);
+    expect(provenanceInvalid.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry model request failures", async () => {
+    const client: ResearcherModelClient = {
+      complete: vi.fn().mockRejectedValue(new Error("provider failure")),
+    };
+
+    await expectDryRunError(runResearcherDryRun({ input, snapshots }, client), "MODEL_REQUEST_FAILED");
+    expect(client.complete).toHaveBeenCalledTimes(1);
   });
 
   it("preserves unresolved questions and research-sufficiency confidence", async () => {
