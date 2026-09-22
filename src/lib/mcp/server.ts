@@ -79,7 +79,7 @@ export function createStandloudMcpServer() {
 
   server.registerTool("get_lead", {
     title: "Consultar lead",
-    description: "Retorna dados comerciais, atividades recentes e pesquisa estruturada (evidencias e analise) de um unico lead.",
+    description: "Retorna dados comerciais, atividades recentes e pesquisa estruturada: evidencias sao observacoes de pesquisa registradas; analise e interpretacao comercial registrada.",
     inputSchema: getLeadInputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, async ({ leadId }) => runReadTool(async () => {

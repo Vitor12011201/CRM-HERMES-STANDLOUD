@@ -120,6 +120,7 @@ describe("STANDLOUD MCP server", () => {
     const payload = JSON.parse(toolText(result));
 
     expect(getLeadTool?.description).toContain("pesquisa estruturada");
+    expect(getLeadTool?.description).toContain("observacoes de pesquisa registradas");
     expect(getLeadTool?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
     expect(payload.lead).toMatchObject({
       classification: "A",
