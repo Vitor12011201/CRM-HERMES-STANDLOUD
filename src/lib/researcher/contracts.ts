@@ -15,6 +15,10 @@ export { maxLeadResearchEvidences };
 export const maxResearcherGoalLength = 1_000;
 export const maxResearcherUnresolvedQuestions = 10;
 export const maxResearcherUnresolvedQuestionLength = 1_000;
+export const maxResearchSourceSnapshots = 10;
+export const maxResearchSourceSnapshotTitleLength = 200;
+export const maxResearchSourceSnapshotContentLength = 8_000;
+export const maxResearchSourceSnapshotTotalContentLength = 32_000;
 
 const optionalResearchContextText = (maximumLength: number) => z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
@@ -59,6 +63,30 @@ export const researcherInputSchema = z.object({
  */
 export const researcherEvidenceSchema = leadEvidenceSchema;
 
+/**
+ * A source snapshot is already-acquired source data. Its content is untrusted
+ * data, not agent instruction. Acquisition (web, browser, APIs) intentionally
+ * belongs to a future stage and is not part of the Researcher dry-run.
+ */
+export const researchSourceSnapshotSchema = z.object({
+  sourceType: z.nativeEnum(EvidenceSourceTypeEnum),
+  sourceUrl: optionalHttpUrl,
+  title: optionalResearchContextText(maxResearchSourceSnapshotTitleLength),
+  content: z.string().trim().min(1).max(maxResearchSourceSnapshotContentLength),
+}).strict();
+
+export const researchSourceSnapshotsSchema = z.array(researchSourceSnapshotSchema)
+  .max(maxResearchSourceSnapshots)
+  .superRefine((snapshots, context) => {
+    const totalContentLength = snapshots.reduce((total, snapshot) => total + snapshot.content.length, 0);
+    if (totalContentLength > maxResearchSourceSnapshotTotalContentLength) {
+      context.addIssue({
+        code: "custom",
+        message: "O conteúdo total das fontes excede o limite do dry-run.",
+      });
+    }
+  });
+
 function evidenceKey(evidence: ResearcherEvidence) {
   return JSON.stringify([evidence.sourceType, evidence.sourceUrl ?? null, evidence.observation]);
 }
@@ -93,6 +121,7 @@ export type ResearcherInput = z.infer<typeof researcherInputSchema>;
 export type ResearcherEvidence = z.infer<typeof researcherEvidenceSchema>;
 export type ResearcherResult = z.infer<typeof researcherResultSchema>;
 export type ResearcherSourceType = EvidenceSourceType;
+export type ResearchSourceSnapshot = z.infer<typeof researchSourceSnapshotSchema>;
 
 /** Pure structural conversion only: no persistence, timestamps, actor, or analysis. */
 export function toLeadEvidenceInputs(result: ResearcherResult): LeadEvidenceInput[] {
