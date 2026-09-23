@@ -1,7 +1,9 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { ActivityChannel, ActivityType, LeadStatus } from "@/generated/prisma/enums";
+import type { z } from "zod";
 import { getDb, type DbClient } from "@/lib/db";
 import { getLeadClassification, leadStatusLabels } from "@/lib/lead";
+import { leadSchema } from "@/lib/validation";
 import {
   maxScoutExistingLeadReferences,
   scoutExistingLeadReferenceSchema,
@@ -9,6 +11,17 @@ import {
 } from "@/lib/scout/contracts";
 import { ServiceNotFoundError } from "./errors";
 import { leadResearchSelection, toLeadResearchOutput } from "./lead-research";
+
+export type LeadCreateInput = z.infer<typeof leadSchema>;
+type LeadCreateDb = Pick<DbClient, "lead">;
+
+/** Sanitized service-boundary rejection for inputs outside the Lead contract. */
+export class LeadCreateValidationError extends Error {
+  constructor(public readonly code: "LEAD_CREATE_INPUT_INVALID") {
+    super(code);
+    this.name = "LeadCreateValidationError";
+  }
+}
 
 export type LeadListFilters = {
   status?: LeadStatus;
@@ -134,6 +147,21 @@ export async function listLeads(filters: LeadListFilters) {
   });
 
   return leads.map(toLeadListItem);
+}
+
+/**
+ * Reusable Lead creation boundary. It validates unknown runtime input through
+ * leadSchema and persists only the parsed scalar Lead data.
+ */
+export async function createLead(
+  input: unknown,
+  db: LeadCreateDb = getDb(),
+) {
+  const parsed = leadSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new LeadCreateValidationError("LEAD_CREATE_INPUT_INVALID");
+  }
+  return db.lead.create({ data: parsed.data });
 }
 
 /**
