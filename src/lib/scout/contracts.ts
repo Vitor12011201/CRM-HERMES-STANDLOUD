@@ -43,6 +43,7 @@ export const scoutDiscoverySourceTypeSchema = z.enum([
   "GOOGLE_MAPS",
   "WEBSITE",
   "DIRECTORY",
+  "FOURSQUARE",
   "OTHER",
 ]);
 
@@ -276,7 +277,7 @@ function buildBasis(candidate: ScoutDiscoveryCandidate, criteria: ScoutCriteria)
 
   const targetSegments = criteria.targetSegments ?? [];
   if (candidate.segment !== undefined && targetSegments.length > 0) {
-    basis.push(`Discovery record reports segment as ${candidate.segment}.`);
+    basis.push(`Discovery candidate matches segment ${candidate.segment}.`);
   }
 
   if (criteria.requirePublicWebsite && candidate.websiteUrl !== undefined) {

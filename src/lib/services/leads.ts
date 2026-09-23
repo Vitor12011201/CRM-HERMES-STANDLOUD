@@ -2,6 +2,11 @@ import type { Prisma } from "@/generated/prisma/client";
 import type { ActivityChannel, ActivityType, LeadStatus } from "@/generated/prisma/enums";
 import { getDb, type DbClient } from "@/lib/db";
 import { getLeadClassification, leadStatusLabels } from "@/lib/lead";
+import {
+  maxScoutExistingLeadReferences,
+  scoutExistingLeadReferenceSchema,
+  type ScoutExistingLeadReference,
+} from "@/lib/scout/contracts";
 import { ServiceNotFoundError } from "./errors";
 import { leadResearchSelection, toLeadResearchOutput } from "./lead-research";
 
@@ -29,6 +34,48 @@ export type LeadMutationOutcome<T> = {
   beforeData: Record<string, unknown>;
   afterData: Record<string, unknown>;
 };
+
+export const scoutExistingLeadReferenceSelection = {
+  id: true,
+  companyName: true,
+  city: true,
+  region: true,
+  websiteUrl: true,
+} as const satisfies Prisma.LeadSelect;
+
+export type ScoutExistingLeadReferenceReadErrorCode =
+  | "SCOUT_EXISTING_LEAD_REFERENCE_INVALID"
+  | "SCOUT_EXISTING_LEAD_REFERENCE_LIMIT_EXCEEDED"
+  | "SCOUT_EXISTING_LEAD_REFERENCE_READ_FAILED";
+
+/**
+ * Sanitized failure for the bounded, read-only input used by Scout duplicate
+ * filtering. It never includes CRM row data.
+ */
+export class ScoutExistingLeadReferenceReadError extends Error {
+  constructor(public readonly code: ScoutExistingLeadReferenceReadErrorCode) {
+    super(code);
+    this.name = "ScoutExistingLeadReferenceReadError";
+  }
+}
+
+type ScoutExistingLeadReferenceDb = Pick<DbClient, "lead">;
+
+function toScoutExistingLeadReference(lead: {
+  id: string;
+  companyName: string;
+  city: string | null;
+  region: string | null;
+  websiteUrl: string | null;
+}) {
+  return {
+    id: lead.id,
+    companyName: lead.companyName,
+    ...(lead.city === null ? {} : { city: lead.city }),
+    ...(lead.region === null ? {} : { region: lead.region }),
+    ...(lead.websiteUrl === null ? {} : { websiteUrl: lead.websiteUrl }),
+  };
+}
 
 function classificationScoreRange(classification?: LeadListFilters["classification"]) {
   if (classification === "A") return { min: 8, max: 10 };
@@ -87,6 +134,47 @@ export async function listLeads(filters: LeadListFilters) {
   });
 
   return leads.map(toLeadListItem);
+}
+
+/**
+ * Supplies only the minimum existing-Lead identity context required by Scout's
+ * pure duplicate rule. Duplicate assessment stays in Scout; this service only
+ * performs the request-scoped CRM read.
+ */
+export async function listScoutExistingLeadReferences(
+  db: ScoutExistingLeadReferenceDb = getDb(),
+): Promise<ScoutExistingLeadReference[]> {
+  let leads: Awaited<ReturnType<ScoutExistingLeadReferenceDb["lead"]["findMany"]>>;
+  try {
+    leads = await db.lead.findMany({
+      select: scoutExistingLeadReferenceSelection,
+      orderBy: { id: "asc" },
+      // Read one additional row so the CRM cannot silently omit duplicate context.
+      take: maxScoutExistingLeadReferences + 1,
+    });
+  } catch {
+    throw new ScoutExistingLeadReferenceReadError(
+      "SCOUT_EXISTING_LEAD_REFERENCE_READ_FAILED",
+    );
+  }
+
+  if (leads.length > maxScoutExistingLeadReferences) {
+    throw new ScoutExistingLeadReferenceReadError(
+      "SCOUT_EXISTING_LEAD_REFERENCE_LIMIT_EXCEEDED",
+    );
+  }
+
+  const parsed = scoutExistingLeadReferenceSchema.array()
+    .max(maxScoutExistingLeadReferences)
+    .safeParse(leads.map(toScoutExistingLeadReference));
+
+  if (!parsed.success) {
+    throw new ScoutExistingLeadReferenceReadError(
+      "SCOUT_EXISTING_LEAD_REFERENCE_INVALID",
+    );
+  }
+
+  return parsed.data;
 }
 
 export async function getLeadDetail(leadId: string) {

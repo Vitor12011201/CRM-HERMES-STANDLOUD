@@ -6,6 +6,7 @@ import {
   maxScoutTargetLocations,
   runScoutDeterministicSelection,
   scoutDiscoveryCandidateSchema,
+  scoutDiscoverySourceTypeSchema,
   scoutInputSchema,
   scoutResultSchema,
 } from "./contracts";
@@ -37,6 +38,15 @@ function input(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Scout V0 deterministic contract", () => {
+  it("keeps discovery source types explicit while accepting FOURSQUARE provenance", () => {
+    expect(scoutDiscoverySourceTypeSchema.safeParse("GOOGLE_MAPS").success).toBe(true);
+    expect(scoutDiscoverySourceTypeSchema.safeParse("WEBSITE").success).toBe(true);
+    expect(scoutDiscoverySourceTypeSchema.safeParse("DIRECTORY").success).toBe(true);
+    expect(scoutDiscoverySourceTypeSchema.safeParse("FOURSQUARE").success).toBe(true);
+    expect(scoutDiscoverySourceTypeSchema.safeParse("OTHER").success).toBe(true);
+    expect(scoutDiscoverySourceTypeSchema.safeParse("RANDOM").success).toBe(false);
+  });
+
   it("returns one FOUND candidate with factual basis when one record is objectively eligible", () => {
     const result = runScoutDeterministicSelection(input());
 
@@ -45,7 +55,7 @@ describe("Scout V0 deterministic contract", () => {
       expect(result.candidate.discoveryId).toBe("discovery-atlas");
       expect(result.basis).toEqual([
         "Discovery record reports city as Jacarei.",
-        "Discovery record reports segment as Climatizacao.",
+        "Discovery candidate matches segment Climatizacao.",
         "Discovery provenance type is DIRECTORY.",
       ]);
       expect(result.unresolvedQuestions).toEqual([]);
@@ -158,7 +168,7 @@ describe("Scout V0 deterministic contract", () => {
     if (result.outcome === "FOUND") {
       expect(result.basis).toEqual([
         "Discovery record reports city as Jacarei and region as SP.",
-        "Discovery record reports segment as Contabilidade.",
+        "Discovery candidate matches segment Contabilidade.",
         "A public HTTP(S) website URL was supplied.",
         "Discovery provenance type is DIRECTORY.",
       ]);

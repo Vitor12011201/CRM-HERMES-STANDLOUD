@@ -40,7 +40,8 @@ export const scoutDiscoveryRequestSchema = z.object({
   limit: z.number().int().min(1).max(maxScoutDiscoveryCandidates),
 }).strict();
 
-export const scoutDiscoveryProviderNameSchema = z.enum(["SYNTHETIC"]);
+/** Explicitly supported source adapters; arbitrary provider strings are rejected. */
+export const scoutDiscoveryProviderNameSchema = z.enum(["SYNTHETIC", "FOURSQUARE"]);
 
 /**
  * Provider output intentionally permits duplicate records. Exact duplicate
@@ -105,7 +106,8 @@ export async function discoverScoutCandidates(
   let rawResult: ScoutDiscoveryProviderResult;
   try {
     rawResult = await provider.discover(parsedRequest.data);
-  } catch {
+  } catch (error) {
+    if (error instanceof ScoutDiscoveryProviderError) throw error;
     throw new ScoutDiscoveryProviderError("DISCOVERY_PROVIDER_FAILED");
   }
 

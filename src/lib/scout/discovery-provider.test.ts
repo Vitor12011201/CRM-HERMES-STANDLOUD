@@ -6,6 +6,7 @@ import {
   InMemoryScoutDiscoveryProvider,
   maxScoutDiscoveryProviderLocations,
   ScoutDiscoveryProviderError,
+  scoutDiscoveryProviderNameSchema,
   scoutDiscoveryRequestSchema,
   type ScoutDiscoveryProvider,
   type ScoutDiscoveryProviderResult,
@@ -43,6 +44,13 @@ function providerReturning(result: unknown): ScoutDiscoveryProvider {
 }
 
 describe("Scout Discovery Provider V0", () => {
+  it("keeps the provider-name contract explicit for SYNTHETIC and FOURSQUARE", () => {
+    expect(scoutDiscoveryRequestSchema.safeParse(request()).success).toBe(true);
+    expect(scoutDiscoveryProviderNameSchema.safeParse("SYNTHETIC").success).toBe(true);
+    expect(scoutDiscoveryProviderNameSchema.safeParse("FOURSQUARE").success).toBe(true);
+    expect(scoutDiscoveryProviderNameSchema.safeParse("RANDOM").success).toBe(false);
+  });
+
   it("returns one valid candidate through the fake provider", async () => {
     const candidates = await discoverScoutCandidates(
       new InMemoryScoutDiscoveryProvider([candidate()]),
