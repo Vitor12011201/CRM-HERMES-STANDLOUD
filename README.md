@@ -62,6 +62,14 @@ Agentes não devem manter estado de negócio paralelo ao CRM.
 - Workerd fetch receiver regression fix.
 - Final tests and review; published to `main`.
 
+### Scout Lead Approval Boundary
+
+- A Scout `FOUND` never authorizes a write on its own; explicit human approval is required.
+- The approved candidate is captured in an immutable snapshot.
+- The Lead contract is validated at runtime before persistence.
+- CRM duplicate state is rechecked immediately before creation; exact and ambiguous matches fail closed.
+- Published snapshot: `2c221a97c5f203448444c351aff9953dc512e414`.
+
 ## Frozen
 
 - Researcher V1 = **FROZEN**
@@ -84,15 +92,14 @@ Nenhuma API key, hostname atual do tunnel, secret ou token pertence a este docum
 
 ## Next
 
-A próxima feature recomendada é converter um `ScoutResult` `FOUND` em Lead somente após aprovação humana explícita.
+A próxima feature recomendada é criar a revisão persistente de candidatos Scout e o futuro fluxo humano em `/scout`.
 
 ```text
-ScoutResult
-→ CandidateLead
-→ HumanApproval
-→ ApprovedLeadCreation
-→ Lead service
-→ D1
+Scout
+→ persistent candidate
+→ human review
+→ reject OR approve
+→ approved Lead creation
 ```
 
 Scout não cria Lead automaticamente. Essa arquitetura é a orientação atual e pode mudar após design ou review.

@@ -67,6 +67,13 @@ enum AnalysisConfidence {
   HIGH
 }
 
+enum ScoutCandidateReviewStatus {
+  PENDING
+  APPROVING
+  REJECTED
+  CONVERTED
+}
+
 model Lead {
   id                 String         @id @default(cuid())
   companyName        String
@@ -98,9 +105,33 @@ model Lead {
   projects           Project[]
   evidences          LeadEvidence[]
   analysis           LeadAnalysis?
+  scoutCandidateReview ScoutCandidateReview?
 
   @@index([status])
   @@index([nextFollowUpAt])
+}
+
+model ScoutCandidateReview {
+  id                      String                     @id @default(cuid())
+  discoveryId             String
+  companyName             String
+  city                    String?
+  region                  String?
+  segment                 String?
+  websiteUrl              String?
+  sourceType              String
+  sourceUrl               String?
+  basisJson               String
+  unresolvedQuestionsJson String
+  status                  ScoutCandidateReviewStatus @default(PENDING)
+  leadId                  String?                    @unique
+  lead                    Lead?                      @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  reviewedAt              DateTime?
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+
+  @@unique([sourceType, discoveryId])
+  @@index([status, createdAt])
 }
 
 model LeadActivity {
