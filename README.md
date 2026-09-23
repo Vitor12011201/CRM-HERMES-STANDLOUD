@@ -2,6 +2,152 @@
 
 Ferramenta privada para a operação comercial da STANDLOUD: centraliza leads, pipeline, histórico de contatos, follow-ups, projetos, pagamentos e métricas básicas. Ela não é um SaaS público. O acesso web é protegido por uma sessão single-user assinada no Worker.
 
+# Project State — Living Roadmap
+
+Esta seção registra a verdade atual do projeto, não uma especificação imutável. Ela pode mudar quando novas evidências, prioridades ou decisões arquiteturais exigirem revisão; decisões anteriores podem ser substituídas. O histórico permanece no Git, enquanto este roadmap mantém apenas o estado atual.
+
+## Current snapshot
+
+- Current branch: `main`
+- Current published Scout V1 commit: `a0e7bb06fff38d6380c798bd8f630a2f07d8e233`
+- Data da revisão: 2026-09-23
+
+O SHA é somente um snapshot da revisão atual, não uma regra permanente.
+
+## Current architecture
+
+- CRM: source of truth, business memory e audit.
+- Deterministic workflow: controla processos conhecidos e seus estados.
+- Hermes: assistente do CRM agora; futuro orchestrator/manager.
+- Specialists: Scout, Researcher, Analyst, Demo Builder, QA/Critic e Sales.
+
+Princípio de responsabilidades:
+
+```text
+Scout discovers.
+Researcher observes.
+Analyst interprets.
+```
+
+Agentes não devem manter estado de negócio paralelo ao CRM.
+
+## Completed
+
+### CRM foundation
+
+- Cloudflare Worker, D1 e Prisma com client request-scoped.
+- Login single-user, dashboard, leads e finance.
+
+### MCP
+
+- Bearer auth.
+- Controlled read tools e controlled safe-write tools.
+- Audit.
+
+### Researcher V1
+
+- Contracts e controlled website acquisition.
+- Metadata / JSON-LD.
+- Boundary `OBSERVED != INFERRED`.
+- Human approval, LeadEvidence persistence e dedupe/idempotency.
+- Real E2E validation.
+
+### Scout V1
+
+- Deterministic contracts e exact duplicate logic.
+- Discovery provider abstraction e Foursquare provider.
+- Explicit Contabilidade taxonomy mapping.
+- Real Foursquare validation e CRM read-only duplicate context.
+- Integrated real D1 + Foursquare + Scout validation.
+- Workerd fetch receiver regression fix.
+- Final tests and review; published to `main`.
+
+## Frozen
+
+- Researcher V1 = **FROZEN**
+- Scout V1 = **FROZEN**
+
+Não modificar essas fases sem evidência nova, bug real ou necessidade arquitetural clara.
+
+## Current operational state
+
+### Hermes
+
+- Hermes API Server roda localmente no Windows em `127.0.0.1:8642`.
+- O CRM Worker alcança Hermes via HTTPS tunnel.
+- Atualmente a bridge usa Cloudflare Quick Tunnel.
+- Hermes está funcional e integrado ao CRM.
+- Quick Tunnel é temporário; reboot encerra Hermes e cloudflared, e um novo tunnel pode gerar outra URL após restart.
+- Quick Tunnel é infraestrutura temporária de desenvolvimento/teste; Named Tunnel permanece no backlog para fornecer hostname estável.
+
+Nenhuma API key, hostname atual do tunnel, secret ou token pertence a este documento.
+
+## Next
+
+A próxima feature recomendada é converter um `ScoutResult` `FOUND` em Lead somente após aprovação humana explícita.
+
+```text
+ScoutResult
+→ CandidateLead
+→ HumanApproval
+→ ApprovedLeadCreation
+→ Lead service
+→ D1
+```
+
+Scout não cria Lead automaticamente. Essa arquitetura é a orientação atual e pode mudar após design ou review.
+
+## After next
+
+Roadmap atual, sem ordem imutável:
+
+1. Analyst
+2. Demo Builder
+3. QA / Critic
+4. Sales
+5. Deterministic workflow/state machine
+6. Hermes orchestration
+7. Metrics/evaluation
+8. Scaling
+
+## Deferred / backlog
+
+- Replace Quick Tunnel with stable Named Tunnel.
+- Automatic Hermes startup on Windows.
+- Automatic cloudflared startup.
+- Persistent/safe Foursquare local secret workflow.
+- 24/7 Hermes hosting evaluation.
+- Model routing / cheaper models.
+- Own evaluation datasets.
+- Possible workflow engine if complexity justifies it.
+- CI on push/main review.
+
+**DEFERRED** não significa rejeitado: significa que não é a prioridade atual.
+
+## Current principles
+
+- CRM remains source of truth.
+- Known process belongs in deterministic code.
+- Agents are used where judgment is useful.
+- Human approval remains required for important external or irreversible actions.
+- No automatic outbound messaging.
+- No arbitrary SQL, shell or database access for agents.
+- Specialist agents should receive minimum necessary context.
+- Structured inputs/outputs are preferred.
+- Do not adopt a multi-agent framework without a concrete need.
+- Start with low volume and validate quality before scaling.
+
+## Update policy
+
+Quando uma fase relevante terminar ou uma decisão arquitetural mudar:
+
+1. Revise o Living Roadmap.
+2. Remova informação que deixou de representar o estado atual.
+3. Mova itens entre NEXT, DONE, DEFERRED e FROZEN.
+4. Altere próximos passos quando necessário.
+5. Não mantenha decisões antigas apenas por inércia.
+6. Use o Git para histórico; não transforme o README em changelog.
+
 ## Escopo da V1
 
 - Dashboard com funil, follow-ups e resumo financeiro.
@@ -37,7 +183,7 @@ As páginas `/`, `/dashboard`, `/leads`, `/leads/*`, `/finance` e `/assistant`, 
 
 A sessão contém apenas uma expiração e é assinada no servidor com HMAC-SHA-256 via Web Crypto. O cookie `standloud_session` é `HttpOnly`, `SameSite=Lax`, usa `Path=/`, dura 12 horas e recebe `Secure` em produção. A senha não é armazenada no cookie, no frontend ou em logs.
 
-Antes do deploy, configure os Worker Secrets de forma interativa; nunca coloque seus valores em arquivos do projeto:
+Configure os Worker Secrets de forma interativa; nunca coloque seus valores em arquivos do projeto:
 
 ```powershell
 npx wrangler secret put STANDLOUD_ADMIN_PASSWORD
@@ -52,7 +198,7 @@ npx wrangler secret put HERMES_API_KEY
 ## Pré-requisitos
 
 - Node.js 22 ou superior.
-- Uma conta Cloudflare somente ao configurar D1 remoto, Access e deploy.
+- Uma conta Cloudflare para configurar D1 remoto e deploy. Cloudflare Access é opcional.
 
 ## Desenvolvimento local
 
@@ -70,7 +216,7 @@ Para testar somente o CRM, os valores `HERMES_BASE_URL` e `HERMES_API_KEY` podem
 
 ## Migrations
 
-As migrations versionadas são [0001_init.sql](prisma/migrations/0001_init.sql) (CRM) e [0002_agent_audit_log.sql](prisma/migrations/0002_agent_audit_log.sql) (auditoria MCP). Para aplicá-las localmente:
+As migrations versionadas são [0001_init.sql](prisma/migrations/0001_init.sql) (CRM), [0002_agent_audit_log.sql](prisma/migrations/0002_agent_audit_log.sql) (auditoria MCP) e [0003_lead_research.sql](prisma/migrations/0003_lead_research.sql) (research de leads). Para aplicá-las localmente:
 
 ```powershell
 npm run db:local:migrate
@@ -79,7 +225,7 @@ npm run db:local:migrate
 Ao alterar `prisma/schema.prisma` no futuro, primeiro aplique todas as migrations existentes ao D1 local. Depois gere e revise uma migration incremental, escolhendo o próximo número sequencial:
 
 ```powershell
-npx prisma migrate diff --config prisma.d1-local.config.ts --from-config-datasource --to-schema prisma/schema.prisma --script --output prisma/migrations/0002_descricao_da_mudanca.sql
+npx prisma migrate diff --config prisma.d1-local.config.ts --from-config-datasource --to-schema prisma/schema.prisma --script --output prisma/migrations/0004_descricao_da_mudanca.sql
 npm run db:local:migrate
 ```
 
@@ -132,13 +278,13 @@ npm run build
 npm run preview
 ```
 
-O deploy está preparado, mas não é automático. Depois de criar D1, configurar o ID, executar migrations remotas e configurar Access, o comando futuro será:
+O CRM já possui deploy de produção. Deploy manual de código continua sendo:
 
 ```powershell
 npm run deploy
 ```
 
-Não execute o deploy antes de revisar a configuração e definir os Worker Secrets necessários.
+Cloudflare Access continua opcional e não é requisito para o login single-user nem para deploy. Migrations remotas são uma operação consciente e separada: execute `npm run db:remote:migrate` somente quando houver uma nova migration revisada.
 
 ## Limitações conhecidas
 
@@ -232,16 +378,18 @@ hermes gateway restart
 cloudflared tunnel --url http://127.0.0.1:8642 --no-autoupdate
 ```
 
-O Quick Tunnel imprime uma URL `https://…trycloudflare.com`; ela muda quando o processo é reiniciado. Não há CORS habilitado para o navegador.
+O Quick Tunnel imprime uma URL `https://…trycloudflare.com`; ela muda quando o processo é reiniciado ou após reboot. Ele é infraestrutura temporária de desenvolvimento/teste; Named Tunnel permanece no backlog para fornecer hostname estável. Não há CORS habilitado para o navegador.
 
-Antes de um deploy que conecte o chat, configure os segredos do Worker de forma interativa. O terceiro comando lê a chave local sem imprimi-la:
+Configure os segredos do Worker de forma interativa, fornecendo os valores nos prompts locais:
 
 ```powershell
 npx wrangler secret put HERMES_BASE_URL
-[Environment]::GetEnvironmentVariable('API_SERVER_KEY', 'User') | npx wrangler secret put HERMES_API_KEY
+npx wrangler secret put HERMES_API_KEY
 ```
 
-Informe a URL HTTPS do Quick Tunnel somente no prompt de `HERMES_BASE_URL`. Depois de alterar qualquer um desses valores, será necessário fazer um novo deploy manualmente com `npm run deploy`.
+Para `HERMES_BASE_URL`, informe somente a URL HTTPS base: sem aspas, espaços, texto adicional, path, query ou hash. Nunca registre valores reais no README.
+
+`wrangler secret put` cria uma nova versão do Worker e a implanta imediatamente; não execute `npm run deploy` apenas para aplicar uma alteração de secret. Use `npm run deploy` para alteração de código. Migrations D1 continuam sendo uma operação separada e consciente.
 
 O Hermes local mantém o MCP `standloud_crm` limitado a estas oito tools:
 
