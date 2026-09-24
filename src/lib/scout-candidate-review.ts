@@ -67,7 +67,7 @@ type ScoutCandidateReviewStorageCreateInput = Omit<
 type ScoutCandidateReviewCompareAndSetInput = {
   status: ScoutCandidateReviewStatus;
   leadId?: string;
-  reviewedAt?: Date;
+  reviewedAt?: Date | null;
 };
 
 export type ScoutCandidateReviewStore = {
@@ -80,6 +80,7 @@ export type ScoutCandidateReviewStore = {
   ): Promise<ScoutCandidateReviewStorageRecord>;
   findById(id: string): Promise<ScoutCandidateReviewStorageRecord | null>;
   listPending(): Promise<ScoutCandidateReviewStorageRecord[]>;
+  listActionable(): Promise<ScoutCandidateReviewStorageRecord[]>;
   listSeenIdentities(): Promise<Array<{ sourceType: string; discoveryId: string }>>;
   compareAndSet(
     id: string,
@@ -98,6 +99,11 @@ export type ScoutCandidateReviewTransitionResult = Readonly<{
   review: ScoutCandidateReview;
   changed: boolean;
 }>;
+
+/** A successful approval claim deliberately carries no post-write row read. */
+export type ScoutCandidateReviewApprovalClaimResult =
+  | Readonly<{ changed: true }>
+  | Readonly<{ changed: false; review: ScoutCandidateReview }>;
 
 export class ScoutCandidateReviewError extends Error {
   constructor(
@@ -266,6 +272,10 @@ export function createScoutCandidateReviewStore(db: ScoutCandidateReviewDb): Sco
       where: { status: "PENDING" },
       orderBy: { createdAt: "asc" },
     }),
+    listActionable: () => db.scoutCandidateReview.findMany({
+      where: { status: { in: ["PENDING", "APPROVING"] } },
+      orderBy: { createdAt: "asc" },
+    }),
     listSeenIdentities: () => db.scoutCandidateReview.findMany({
       select: { sourceType: true, discoveryId: true },
       orderBy: { createdAt: "asc" },
@@ -350,6 +360,14 @@ export async function listPendingScoutCandidateReviews(
   return records.map(parseStoredReview);
 }
 
+/** Lists the human-actionable queue, including claims awaiting safe reconciliation. */
+export async function listActionableScoutCandidateReviews(
+  store: ScoutCandidateReviewStore = liveStore(),
+): Promise<ScoutCandidateReview[]> {
+  const records = await sanitizeStorageRead(() => store.listActionable());
+  return records.map(parseStoredReview);
+}
+
 export async function getScoutCandidateReview(
   id: string,
   store: ScoutCandidateReviewStore = liveStore(),
@@ -384,12 +402,37 @@ export async function claimScoutCandidateReviewForApproval(
   id: string,
   store: ScoutCandidateReviewStore = liveStore(),
   now: Date = new Date(),
+): Promise<ScoutCandidateReviewApprovalClaimResult> {
+  const result = await sanitizeStorageRead(() =>
+    store.compareAndSet(id, "PENDING", { status: "APPROVING", reviewedAt: now }));
+  if (!Number.isInteger(result.count) || result.count < 0 || result.count > 1) {
+    throw storageInvalid();
+  }
+
+  // The owner already loaded the immutable review facts before this CAS. Avoiding
+  // a required post-write read keeps a proven owner from being stranded on a read failure.
+  if (result.count === 1) return { changed: true };
+
+  const current = await requireReview(id, store);
+  if (
+    current.status === "APPROVING"
+    || (current.status === "CONVERTED" && current.leadId !== undefined)
+  ) {
+    return { changed: false, review: current };
+  }
+  throw new ScoutCandidateReviewError("SCOUT_REVIEW_INVALID_STATE");
+}
+
+/** Releases only an owner claim whose Lead write was proven not to have started. */
+export async function releaseScoutCandidateReviewApprovalClaim(
+  id: string,
+  store: ScoutCandidateReviewStore = liveStore(),
 ): Promise<ScoutCandidateReviewTransitionResult> {
   return compareAndSetReviewStatus(
     id,
-    "PENDING",
-    { status: "APPROVING", reviewedAt: now },
-    (review) => review.status === "APPROVING",
+    "APPROVING",
+    { status: "PENDING", reviewedAt: null },
+    (review) => review.status === "PENDING",
     store,
   );
 }

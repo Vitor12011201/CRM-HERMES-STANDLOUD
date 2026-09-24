@@ -8,6 +8,7 @@ const links = [
   { href: "/dashboard", label: "Dashboard", icon: "▦" },
   { href: "/leads", label: "Leads", icon: "◎" },
   { href: "/finance", label: "Financeiro", icon: "R$" },
+  { href: "/scout", label: "Scout", icon: "◌" },
   { href: "/assistant", label: "Hermes", icon: "AI" },
 ];
 

@@ -70,6 +70,23 @@ Agentes não devem manter estado de negócio paralelo ao CRM.
 - CRM duplicate state is rechecked immediately before creation; exact and ambiguous matches fail closed.
 - Published snapshot: `2c221a97c5f203448444c351aff9953dc512e414`.
 
+### Persistent Scout Candidate Review
+
+- Persistent candidate memory preserves factual Scout results for human review.
+- `PENDING`, `APPROVING`, `REJECTED` and `CONVERTED` transitions use compare-and-set claims.
+- Seen discovery identities prevent previously reviewed candidates from reappearing.
+- Exact Scout provenance supports safe Lead-creation recovery after an interrupted approval.
+- The D1 schema and constraints were validated locally.
+- Published snapshot: `7529d354cd4ab6e977699076ec50c724c157667b`.
+
+### Operational Scout Review Flow
+
+- `/scout` is the authenticated human-review boundary for persisted Scout candidates.
+- The actionable queue contains `PENDING` and safe-recovery `APPROVING` reviews; terminal reviews leave the queue.
+- The browser submits only discovery constraints, review IDs and explicit acknowledgement; candidate facts are always reloaded from CRM/D1.
+- Approval reuses the immutable Phase 1 boundary, live duplicate recheck and exact provenance recovery, so retries do not create another Lead.
+- The workflow was implemented and validated locally; its production publication is in progress.
+
 ## Frozen
 
 - Researcher V1 = **FROZEN**
@@ -92,17 +109,7 @@ Nenhuma API key, hostname atual do tunnel, secret ou token pertence a este docum
 
 ## Next
 
-A próxima feature recomendada é criar a revisão persistente de candidatos Scout e o futuro fluxo humano em `/scout`.
-
-```text
-Scout
-→ persistent candidate
-→ human review
-→ reject OR approve
-→ approved Lead creation
-```
-
-Scout não cria Lead automaticamente. Essa arquitetura é a orientação atual e pode mudar após design ou review.
+A próxima feature será definida em tarefa separada após a publicação e observação do fluxo operacional Scout. Scout continua sem criar Lead automaticamente: toda criação exige aprovação humana explícita.
 
 ## After next
 
@@ -223,7 +230,7 @@ Para testar somente o CRM, os valores `HERMES_BASE_URL` e `HERMES_API_KEY` podem
 
 ## Migrations
 
-As migrations versionadas são [0001_init.sql](prisma/migrations/0001_init.sql) (CRM), [0002_agent_audit_log.sql](prisma/migrations/0002_agent_audit_log.sql) (auditoria MCP) e [0003_lead_research.sql](prisma/migrations/0003_lead_research.sql) (research de leads). Para aplicá-las localmente:
+As migrations versionadas são [0001_init.sql](prisma/migrations/0001_init.sql) (CRM), [0002_agent_audit_log.sql](prisma/migrations/0002_agent_audit_log.sql) (auditoria MCP), [0003_lead_research.sql](prisma/migrations/0003_lead_research.sql) (research de leads) e [0004_scout_candidate_review.sql](prisma/migrations/0004_scout_candidate_review.sql) (memória persistente de revisão Scout). Para aplicá-las localmente:
 
 ```powershell
 npm run db:local:migrate
@@ -232,7 +239,7 @@ npm run db:local:migrate
 Ao alterar `prisma/schema.prisma` no futuro, primeiro aplique todas as migrations existentes ao D1 local. Depois gere e revise uma migration incremental, escolhendo o próximo número sequencial:
 
 ```powershell
-npx prisma migrate diff --config prisma.d1-local.config.ts --from-config-datasource --to-schema prisma/schema.prisma --script --output prisma/migrations/0004_descricao_da_mudanca.sql
+npx prisma migrate diff --config prisma.d1-local.config.ts --from-config-datasource --to-schema prisma/schema.prisma --script --output prisma/migrations/0005_descricao_da_mudanca.sql
 npm run db:local:migrate
 ```
 

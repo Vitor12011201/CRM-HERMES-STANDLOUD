@@ -7,10 +7,12 @@ import {
   findLeadByScoutProvenance,
   getScoutCandidateReview,
   listPendingScoutCandidateReviews,
+  listActionableScoutCandidateReviews,
   listSeenScoutDiscoveryIdentities,
   markScoutCandidateReviewConverted,
   persistScoutCandidateReview,
   rejectScoutCandidateReview,
+  releaseScoutCandidateReviewApprovalClaim,
   toScoutFoundResult,
   type ScoutCandidateReviewStore,
 } from "./scout-candidate-review";
@@ -73,6 +75,12 @@ class InMemoryScoutCandidateReviewStore implements ScoutCandidateReviewStore {
   async listPending() {
     return this.rows
       .filter((row) => row.status === "PENDING")
+      .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+  }
+
+  async listActionable() {
+    return this.rows
+      .filter((row) => row.status === "PENDING" || row.status === "APPROVING")
       .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
   }
 
@@ -210,6 +218,21 @@ describe("Scout candidate review persistence", () => {
     ]);
   });
 
+  it("lists PENDING and APPROVING reviews as the FIFO human-actionable queue", async () => {
+    const store = new InMemoryScoutCandidateReviewStore();
+    const pending = await persistScoutCandidateReview(foundResult(), store);
+    const approvingResult = foundResult();
+    if (approvingResult.outcome !== "FOUND") throw new Error("test setup");
+    approvingResult.candidate.discoveryId = "fsq-456";
+    const approving = await persistScoutCandidateReview(approvingResult, store);
+    await claimScoutCandidateReviewForApproval(approving.review.id, store);
+    await rejectScoutCandidateReview(pending.review.id, store);
+
+    await expect(listActionableScoutCandidateReviews(store)).resolves.toMatchObject([
+      { discoveryId: "fsq-456", status: "APPROVING" },
+    ]);
+  });
+
   it("transitions PENDING to REJECTED and makes the same rejection idempotent", async () => {
     const store = new InMemoryScoutCandidateReviewStore();
     const { review } = await persistScoutCandidateReview(foundResult(), store);
@@ -238,7 +261,7 @@ describe("Scout candidate review persistence", () => {
     const { review } = await persistScoutCandidateReview(foundResult(), store);
 
     await expect(claimScoutCandidateReviewForApproval(review.id, store)).resolves
-      .toMatchObject({ changed: true, review: { status: "APPROVING" } });
+      .toEqual({ changed: true });
     await expect(rejectScoutCandidateReview(review.id, store)).rejects
       .toMatchObject({ code: "SCOUT_REVIEW_INVALID_STATE" });
     await expect(getScoutCandidateReview(review.id, store)).resolves
@@ -252,9 +275,72 @@ describe("Scout candidate review persistence", () => {
     const claimed = await claimScoutCandidateReviewForApproval(review.id, store);
     const retried = await claimScoutCandidateReviewForApproval(review.id, store);
 
-    expect(claimed).toMatchObject({ changed: true, review: { status: "APPROVING" } });
+    expect(claimed).toEqual({ changed: true });
     expect(retried).toMatchObject({ changed: false, review: { status: "APPROVING" } });
     expect(store.rows[0].status).toBe("APPROVING");
+  });
+
+  it("returns a successful approval claim without a mandatory post-CAS read", async () => {
+    const store = new InMemoryScoutCandidateReviewStore();
+    const { review } = await persistScoutCandidateReview(foundResult(), store);
+    const compareAndSet = store.compareAndSet.bind(store);
+    let claimCasCompleted = false;
+    store.compareAndSet = async (...args) => {
+      const result = await compareAndSet(...args);
+      claimCasCompleted = result.count === 1;
+      return result;
+    };
+    store.findById = async () => {
+      if (claimCasCompleted) throw new Error("post-CAS read must not occur");
+      return null;
+    };
+
+    await expect(claimScoutCandidateReviewForApproval(review.id, store)).resolves
+      .toEqual({ changed: true });
+  });
+
+  it("returns a converted review to a claim loser when conversion wins the race", async () => {
+    const store = new InMemoryScoutCandidateReviewStore();
+    const { review } = await persistScoutCandidateReview(foundResult(), store);
+    store.compareAndSet = async () => {
+      store.rows[0].status = "CONVERTED";
+      store.rows[0].leadId = "lead-existing";
+      store.rows[0].reviewedAt = new Date("2026-09-23T02:00:00.000Z");
+      return { count: 0 };
+    };
+
+    await expect(claimScoutCandidateReviewForApproval(review.id, store)).resolves
+      .toMatchObject({ changed: false, review: { status: "CONVERTED", leadId: "lead-existing" } });
+  });
+
+  it("releases only an APPROVING no-write claim back to PENDING", async () => {
+    const store = new InMemoryScoutCandidateReviewStore();
+    const { review } = await persistScoutCandidateReview(foundResult(), store);
+    await claimScoutCandidateReviewForApproval(review.id, store);
+
+    const released = await releaseScoutCandidateReviewApprovalClaim(review.id, store);
+    const retried = await releaseScoutCandidateReviewApprovalClaim(review.id, store);
+
+    expect(released).toMatchObject({ changed: true, review: { status: "PENDING" } });
+    expect(released.review.reviewedAt).toBeUndefined();
+    expect(retried).toMatchObject({ changed: false, review: { status: "PENDING" } });
+  });
+
+  it("never releases a REJECTED or CONVERTED review", async () => {
+    const store = new InMemoryScoutCandidateReviewStore();
+    const rejected = await persistScoutCandidateReview(foundResult(), store);
+    await rejectScoutCandidateReview(rejected.review.id, store);
+    await expect(releaseScoutCandidateReviewApprovalClaim(rejected.review.id, store)).rejects
+      .toMatchObject({ code: "SCOUT_REVIEW_INVALID_STATE" });
+
+    const convertedResult = foundResult();
+    if (convertedResult.outcome !== "FOUND") throw new Error("test setup");
+    convertedResult.candidate.discoveryId = "fsq-456";
+    const converted = await persistScoutCandidateReview(convertedResult, store);
+    await claimScoutCandidateReviewForApproval(converted.review.id, store);
+    await markScoutCandidateReviewConverted(converted.review.id, "lead-456", store);
+    await expect(releaseScoutCandidateReviewApprovalClaim(converted.review.id, store)).rejects
+      .toMatchObject({ code: "SCOUT_REVIEW_INVALID_STATE" });
   });
 
   it("rejects a direct PENDING to CONVERTED transition", async () => {
@@ -279,7 +365,7 @@ describe("Scout candidate review persistence", () => {
     const converted = await markScoutCandidateReviewConverted(review.id, "lead-1", store);
     const retried = await markScoutCandidateReviewConverted(review.id, "lead-1", store);
 
-    expect(claimed).toMatchObject({ changed: true, review: { status: "APPROVING" } });
+    expect(claimed).toEqual({ changed: true });
     expect(converted).toMatchObject({
       changed: true,
       review: { status: "CONVERTED", leadId: "lead-1" },
@@ -308,8 +394,8 @@ describe("Scout candidate review persistence", () => {
       .toMatchObject({ code: "SCOUT_REVIEW_INVALID_STATE" });
     await expect(rejectScoutCandidateReview(converted.review.id, store)).rejects
       .toMatchObject({ code: "SCOUT_REVIEW_INVALID_STATE" });
-    await expect(claimScoutCandidateReviewForApproval(converted.review.id, store)).rejects
-      .toMatchObject({ code: "SCOUT_REVIEW_INVALID_STATE" });
+    await expect(claimScoutCandidateReviewForApproval(converted.review.id, store)).resolves
+      .toMatchObject({ changed: false, review: { status: "CONVERTED", leadId: "lead-1" } });
   });
 
   it.each([
