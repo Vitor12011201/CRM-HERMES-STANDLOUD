@@ -3,6 +3,9 @@ STANDLOUD_ADMIN_PASSWORD=
 STANDLOUD_SESSION_SECRET=
 STANDLOUD_MCP_TOKEN=
 
-# Optional: leave empty to test the CRM while Hermes is offline.
+# Default Hermes / Assistant profile. Optional: leave empty to test the CRM while Hermes is offline.
 HERMES_BASE_URL=
 HERMES_API_KEY=
+
+# Dedicated named researcher profile used only by the Research Workflow.
+HERMES_RESEARCHER_API_KEY=

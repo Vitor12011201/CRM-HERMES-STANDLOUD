@@ -103,6 +103,15 @@ A configuração pertence à identidade técnica, nunca ao nome organizacional e
 - CRM/D1 owns configured prompt state; the Researcher runtime resolves configuration by `technicalId`, never by display name.
 - Production publication includes the authenticated Team UI/API, the `AgentConfig` and `AgentPromptVersion` schema, and the deployed Ana avatar.
 
+## In development
+
+### Operational Research Workflow V1 — ready for review
+
+- A Lead can start a WEBSITE-only factual research run through Ana (`researcher`), using the active configured prompt or the built-in fallback.
+- A valid run is stored for human review before any `LeadEvidence` write; approval stores explicit evidence indexes, then commits evidence plus `APPROVED` atomically through D1 batch, with recoverable `APPROVING` retries.
+- Research remains factual: it does not change Lead qualification, status, commercial analysis, strategy, or contact data.
+- Migration `0006_lead_research_run.sql` was applied and validated only in local D1; it has not been applied remotely.
+
 ## Frozen
 
 - Researcher V1 = **FROZEN**
@@ -125,7 +134,7 @@ Nenhuma API key, hostname atual do tunnel, secret ou token pertence a este docum
 
 ## Next
 
-Current priority: investigate the production Scout discovery failure. Scout continues to require explicit human approval before any Lead creation.
+Current priority: complete review and controlled rollout of the Operational Research Workflow. The Scout production discovery incident is resolved; Scout continues to require explicit human approval before any Lead creation.
 
 ## After next
 
@@ -242,7 +251,7 @@ npm run dev
 
 Abra `http://localhost:3000`. O comando `dev` gera o Prisma Client e as tipagens do Worker automaticamente. Não use `next dev` para testar fluxos de banco: o runtime suportado é o `vinext dev`, que fornece o binding D1 local.
 
-Para testar somente o CRM, os valores `HERMES_BASE_URL` e `HERMES_API_KEY` podem ficar vazios: a interface indicará que Hermes está offline e o restante do sistema continuará disponível.
+Para testar somente o CRM, os valores `HERMES_BASE_URL`, `HERMES_API_KEY` e `HERMES_RESEARCHER_API_KEY` podem ficar vazios: as superfícies que dependem do Hermes indicarão indisponibilidade, e o restante do sistema continuará disponível. `HERMES_API_KEY` pertence ao perfil padrão do Assistant; o Research Workflow usa a credencial dedicada `HERMES_RESEARCHER_API_KEY` do profile técnico `researcher`.
 
 ## Migrations
 
@@ -415,9 +424,12 @@ Configure os segredos do Worker de forma interativa, fornecendo os valores nos p
 ```powershell
 npx wrangler secret put HERMES_BASE_URL
 npx wrangler secret put HERMES_API_KEY
+npx wrangler secret put HERMES_RESEARCHER_API_KEY
 ```
 
 Para `HERMES_BASE_URL`, informe somente a URL HTTPS base: sem aspas, espaços, texto adicional, path, query ou hash. Nunca registre valores reais no README.
+
+O Assistant continua autenticando no profile Hermes padrão por `HERMES_API_KEY`. A Research Workflow usa o profile nomeado `researcher` e exige `HERMES_RESEARCHER_API_KEY`; não há fallback automático entre essas credenciais.
 
 `wrangler secret put` cria uma nova versão do Worker e a implanta imediatamente; não execute `npm run deploy` apenas para aplicar uma alteração de secret. Use `npm run deploy` para alteração de código. Migrations D1 continuam sendo uma operação separada e consciente.
 

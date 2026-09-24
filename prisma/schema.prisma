@@ -67,6 +67,18 @@ enum AnalysisConfidence {
   HIGH
 }
 
+enum LeadResearchRunStatus {
+  PENDING_REVIEW
+  APPROVING
+  APPROVED
+  REJECTED
+}
+
+enum LeadResearchPromptSource {
+  BUILT_IN
+  CONFIGURED
+}
+
 enum ScoutCandidateReviewStatus {
   PENDING
   APPROVING
@@ -106,6 +118,7 @@ model Lead {
   evidences          LeadEvidence[]
   analysis           LeadAnalysis?
   scoutCandidateReview ScoutCandidateReview?
+  researchRuns       LeadResearchRun[]
 
   @@index([status])
   @@index([nextFollowUpAt])
@@ -173,6 +186,27 @@ model LeadAnalysis {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   lead              Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+}
+
+model LeadResearchRun {
+  id                          String                   @id @default(cuid())
+  leadId                      String
+  technicalId                 String
+  status                      LeadResearchRunStatus    @default(PENDING_REVIEW)
+  inputJson                   String
+  snapshotsJson               String
+  resultJson                  String
+  promptSource                LeadResearchPromptSource
+  promptVersion               Int?
+  model                       String
+  approvedEvidenceIndexesJson String?
+  reviewedAt                  DateTime?
+  createdAt                   DateTime                 @default(now())
+  updatedAt                   DateTime                 @updatedAt
+  lead                        Lead                     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+  @@index([status, createdAt])
 }
 
 model Project {
