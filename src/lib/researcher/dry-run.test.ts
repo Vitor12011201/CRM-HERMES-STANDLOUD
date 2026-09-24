@@ -1,4 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../agent-prompt-config", () => ({
+  resolveAgentPrompt: vi.fn().mockResolvedValue({
+    source: "BUILT_IN",
+    content: "TEST BUILT-IN PROMPT",
+    activeVersion: null,
+    updatedAt: null,
+  }),
+}));
 import {
   maxResearchSourceSnapshots,
   maxResearchSourceSnapshotContentLength,
@@ -15,6 +24,7 @@ import {
   ResearcherDryRunError,
   runResearcherDryRun,
   type ResearcherModelClient,
+  type ResearcherPromptResolver,
 } from "./dry-run";
 
 const input: ResearcherInput = {
@@ -98,6 +108,45 @@ describe("Researcher V1a dry-run", () => {
     expect(request).not.toHaveProperty("tools");
     expect(request.messages[0].role).toBe("system");
     expect(request.messages[1].role).toBe("user");
+  });
+
+  it("uses the resolved built-in or configured prompt in the real model request without changing result contracts", async () => {
+    const client = fakeClient(JSON.stringify(validResult), JSON.stringify(validResult));
+    const builtInPrompt = buildResearcherSystemPrompt();
+    const configuredPrompt = "Configured Researcher instruction.";
+    const builtInResolver: ResearcherPromptResolver = async () => ({
+      source: "BUILT_IN",
+      content: builtInPrompt,
+      activeVersion: null,
+      updatedAt: null,
+    });
+    const configuredResolver: ResearcherPromptResolver = async () => ({
+      source: "CONFIGURED",
+      content: configuredPrompt,
+      activeVersion: 2,
+      updatedAt: new Date("2026-09-24T00:00:00.000Z"),
+    });
+
+    await expect(runResearcherDryRun({ input, snapshots }, client, { promptResolver: builtInResolver }))
+      .resolves.toEqual(validResult);
+    await expect(runResearcherDryRun({ input, snapshots }, client, { promptResolver: configuredResolver }))
+      .resolves.toEqual(validResult);
+
+    expect(vi.mocked(client.complete).mock.calls[0][0].messages[0].content).toBe(builtInPrompt);
+    expect(vi.mocked(client.complete).mock.calls[1][0].messages[0].content).toBe(configuredPrompt);
+  });
+
+  it("returns a sanitized configuration failure rather than silently treating a failed read as built-in", async () => {
+    const client = fakeClient(JSON.stringify(validResult));
+    const failingResolver: ResearcherPromptResolver = async () => {
+      throw new Error("database details must not escape");
+    };
+
+    await expectDryRunError(
+      runResearcherDryRun({ input, snapshots }, client, { promptResolver: failingResolver }),
+      "PROMPT_CONFIGURATION_UNAVAILABLE",
+    );
+    expect(client.complete).not.toHaveBeenCalled();
   });
 
   it("accepts only pure JSON or one complete json fence, with optional external whitespace", async () => {

@@ -9,6 +9,7 @@ const links = [
   { href: "/leads", label: "Leads", icon: "◎" },
   { href: "/finance", label: "Financeiro", icon: "R$" },
   { href: "/scout", label: "Scout", icon: "◌" },
+  { href: "/team", label: "Equipe", icon: "◉" },
   { href: "/assistant", label: "Hermes", icon: "AI" },
 ];
 

@@ -31,6 +31,14 @@ Analyst interprets.
 
 Agentes não devem manter estado de negócio paralelo ao CRM.
 
+## Agent Organizational Identity
+
+Antes da implementação técnica de um novo agente especializado, defina `technicalId`, displayName, role, department, responsabilidade, não-responsabilidades explícitas, avatar e lifecycle inicial. A identidade técnica é estável para código, contracts, tools e integrações; a identidade organizacional é independente e pode evoluir sem quebrá-los.
+
+## Agent Configuration
+
+A configuração pertence à identidade técnica, nunca ao nome organizacional exibido. O prompt built-in permanece como fallback quando não existe uma versão ativa no CRM/D1. Versões configuradas são imutáveis; a versão ativa pode ser alterada ou revertida, inclusive para o fallback, sem apagar o histórico.
+
 ## Completed
 
 ### CRM foundation
@@ -87,6 +95,13 @@ Agentes não devem manter estado de negócio paralelo ao CRM.
 - Approval reuses the immutable Phase 1 boundary, live duplicate recheck and exact provenance recovery, so retries do not create another Lead.
 - The workflow is published to production after local validation, remote D1 migration and unauthenticated route smoke tests.
 - Published snapshot: `d702053e2d753e9a14792463c03dac6ab082df2e`.
+
+### Team and Agent Config V1
+
+- `/team` and `/team/researcher` provide the internal directory and profile for Ana, the organizational identity of the stable `researcher` technical identity.
+- The Agent Config V1 prompt surface is implemented and locally validated: built-in fallback, immutable append-only versions, activation/rollback, and reset to the built-in prompt.
+- CRM/D1 owns configured prompt state; the Researcher runtime resolves configuration by `technicalId`, never by display name.
+- Production publication is in progress; this section does not yet claim it as published.
 
 ## Frozen
 

@@ -224,3 +224,23 @@ model AgentAuditLog {
   @@index([entityType, entityId, createdAt])
   @@index([toolName, createdAt])
 }
+
+model AgentConfig {
+  technicalId         String               @id
+  activePromptVersion Int?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  promptVersions      AgentPromptVersion[]
+}
+
+model AgentPromptVersion {
+  id          String      @id @default(cuid())
+  technicalId String
+  version     Int
+  content     String
+  createdAt   DateTime    @default(now())
+  config      AgentConfig @relation(fields: [technicalId], references: [technicalId], onDelete: Cascade)
+
+  @@unique([technicalId, version])
+  @@index([technicalId, createdAt])
+}
