@@ -85,7 +85,8 @@ Agentes não devem manter estado de negócio paralelo ao CRM.
 - The actionable queue contains `PENDING` and safe-recovery `APPROVING` reviews; terminal reviews leave the queue.
 - The browser submits only discovery constraints, review IDs and explicit acknowledgement; candidate facts are always reloaded from CRM/D1.
 - Approval reuses the immutable Phase 1 boundary, live duplicate recheck and exact provenance recovery, so retries do not create another Lead.
-- The workflow was implemented and validated locally; its production publication is in progress.
+- The workflow is published to production after local validation, remote D1 migration and unauthenticated route smoke tests.
+- Published snapshot: `d702053e2d753e9a14792463c03dac6ab082df2e`.
 
 ## Frozen
 
