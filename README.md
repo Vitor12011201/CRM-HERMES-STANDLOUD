@@ -103,14 +103,13 @@ A configuração pertence à identidade técnica, nunca ao nome organizacional e
 - CRM/D1 owns configured prompt state; the Researcher runtime resolves configuration by `technicalId`, never by display name.
 - Production publication includes the authenticated Team UI/API, the `AgentConfig` and `AgentPromptVersion` schema, and the deployed Ana avatar.
 
-## In development
+### Operational Research Workflow V1
 
-### Operational Research Workflow V1 — ready for review
-
-- A Lead can start a WEBSITE-only factual research run through Ana (`researcher`), using the active configured prompt or the built-in fallback.
-- A valid run is stored for human review before any `LeadEvidence` write; approval stores explicit evidence indexes, then commits evidence plus `APPROVED` atomically through D1 batch, with recoverable `APPROVING` retries.
-- Research remains factual: it does not change Lead qualification, status, commercial analysis, strategy, or contact data.
-- Migration `0006_lead_research_run.sql` was applied and validated only in local D1; it has not been applied remotely.
+- Lead → Ana (`researcher`) provides a WEBSITE-only factual research workflow, using the active configured prompt or built-in fallback.
+- A persistent `LeadResearchRun` captures the validated input, source snapshot, result, prompt metadata and human evidence selection before any `LeadEvidence` write.
+- Human approval uses an atomic D1 batch commit with exact dedupe and recoverable `APPROVING` retries; research does not change qualification, status, commercial analysis, strategy or contact data.
+- The named Hermes `researcher` profile uses dedicated `HERMES_RESEARCHER_API_KEY` authentication; the Assistant remains on `HERMES_API_KEY` with no fallback between profiles.
+- Published to production with migration `0006_lead_research_run.sql`; publication smoke validation created no production research run.
 
 ## Frozen
 
@@ -134,7 +133,7 @@ Nenhuma API key, hostname atual do tunnel, secret ou token pertence a este docum
 
 ## Next
 
-Current priority: complete review and controlled rollout of the Operational Research Workflow. The Scout production discovery incident is resolved; Scout continues to require explicit human approval before any Lead creation.
+Current priority: perform the first manual production research on the approved Smart Cont Lead. This was not executed during the Research Workflow publication; Scout continues to require explicit human approval before any Lead creation.
 
 ## After next
 
@@ -255,7 +254,7 @@ Para testar somente o CRM, os valores `HERMES_BASE_URL`, `HERMES_API_KEY` e `HER
 
 ## Migrations
 
-As migrations versionadas são [0001_init.sql](prisma/migrations/0001_init.sql) (CRM), [0002_agent_audit_log.sql](prisma/migrations/0002_agent_audit_log.sql) (auditoria MCP), [0003_lead_research.sql](prisma/migrations/0003_lead_research.sql) (research de leads) e [0004_scout_candidate_review.sql](prisma/migrations/0004_scout_candidate_review.sql) (memória persistente de revisão Scout). Para aplicá-las localmente:
+As migrations versionadas são [0001_init.sql](prisma/migrations/0001_init.sql) (CRM), [0002_agent_audit_log.sql](prisma/migrations/0002_agent_audit_log.sql) (auditoria MCP), [0003_lead_research.sql](prisma/migrations/0003_lead_research.sql) (research de leads), [0004_scout_candidate_review.sql](prisma/migrations/0004_scout_candidate_review.sql) (memória persistente de revisão Scout), [0005_agent_prompt_config.sql](prisma/migrations/0005_agent_prompt_config.sql) (configuração versionada de prompt) e [0006_lead_research_run.sql](prisma/migrations/0006_lead_research_run.sql) (runs persistidas de pesquisa). Para aplicá-las localmente:
 
 ```powershell
 npm run db:local:migrate
@@ -264,7 +263,7 @@ npm run db:local:migrate
 Ao alterar `prisma/schema.prisma` no futuro, primeiro aplique todas as migrations existentes ao D1 local. Depois gere e revise uma migration incremental, escolhendo o próximo número sequencial:
 
 ```powershell
-npx prisma migrate diff --config prisma.d1-local.config.ts --from-config-datasource --to-schema prisma/schema.prisma --script --output prisma/migrations/0005_descricao_da_mudanca.sql
+npx prisma migrate diff --config prisma.d1-local.config.ts --from-config-datasource --to-schema prisma/schema.prisma --script --output prisma/migrations/0007_descricao_da_mudanca.sql
 npm run db:local:migrate
 ```
 
