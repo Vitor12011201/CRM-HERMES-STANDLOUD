@@ -4,6 +4,7 @@ import {
   getBusinessCalendarDateKey,
   getBusinessCalendarDayBounds,
   getFollowUpTiming,
+  getFollowUpTimingForBusinessDate,
   parseStoredCalendarDate,
 } from "./business-time";
 import { formatCalendarDate, formatDate, isOverdueFollowUp, toCalendarDateInputValue } from "./format";
@@ -20,10 +21,14 @@ describe("business calendar in America/Sao_Paulo", () => {
 
   it("classifies yesterday, today and tomorrow by the business calendar", () => {
     const reference = new Date("2026-09-22T00:30:00.000Z");
+    const businessDate = getBusinessCalendarDateKey(reference);
 
     expect(getFollowUpTiming(parseStoredCalendarDate("2026-09-20"), reference)).toBe("OVERDUE");
     expect(getFollowUpTiming(parseStoredCalendarDate("2026-09-21"), reference)).toBe("TODAY");
     expect(getFollowUpTiming(parseStoredCalendarDate("2026-09-22"), reference)).toBe("UPCOMING");
+    expect(getFollowUpTimingForBusinessDate(parseStoredCalendarDate("2026-09-20"), businessDate)).toBe("OVERDUE");
+    expect(getFollowUpTimingForBusinessDate(parseStoredCalendarDate("2026-09-21"), businessDate)).toBe("TODAY");
+    expect(getFollowUpTimingForBusinessDate(parseStoredCalendarDate("2026-09-22"), businessDate)).toBe("UPCOMING");
     expect(isOverdueFollowUp(parseStoredCalendarDate("2026-09-20"), reference)).toBe(true);
     expect(isOverdueFollowUp(parseStoredCalendarDate("2026-09-21"), reference)).toBe(false);
   });

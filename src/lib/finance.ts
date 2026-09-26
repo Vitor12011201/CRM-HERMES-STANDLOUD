@@ -11,12 +11,19 @@ export function getOutstandingAmountCents(project: AmountProject): number {
   return Math.max(0, project.totalAmountCents - getReceivedAmountCents(project));
 }
 
-export function getFinancialTotals(projects: AmountProject[]) {
-  const contractedCents = projects.reduce((total, project) => total + project.totalAmountCents, 0);
-  const receivedCents = projects.reduce(
-    (total, project) => total + getReceivedAmountCents(project),
-    0,
-  );
+export function getFinancialTotals<TProject extends AmountProject>(
+  projects: TProject[],
+  shouldIncludeProject: (project: TProject) => boolean = () => true,
+) {
+  let contractedCents = 0;
+  let receivedCents = 0;
+
+  for (const project of projects) {
+    if (!shouldIncludeProject(project)) continue;
+    contractedCents += project.totalAmountCents;
+    receivedCents += getReceivedAmountCents(project);
+  }
+
   return {
     contractedCents,
     receivedCents,

@@ -57,10 +57,13 @@ export function getFollowUpCalendarDateKey(value: Date | string) {
   return getBusinessCalendarDateKey(date);
 }
 
-export function getFollowUpTiming(value: Date | string, reference = new Date()): FollowUpTiming {
+export function getFollowUpTimingForBusinessDate(value: Date | string, businessDate: string): FollowUpTiming {
   const followUpDate = getFollowUpCalendarDateKey(value);
-  const businessDate = getBusinessCalendarDateKey(reference);
   if (followUpDate < businessDate) return "OVERDUE";
   if (followUpDate > businessDate) return "UPCOMING";
   return "TODAY";
+}
+
+export function getFollowUpTiming(value: Date | string, reference = new Date()): FollowUpTiming {
+  return getFollowUpTimingForBusinessDate(value, getBusinessCalendarDateKey(reference));
 }
