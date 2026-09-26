@@ -111,6 +111,12 @@ A configuração pertence à identidade técnica, nunca ao nome organizacional e
 - The named Hermes `researcher` profile uses dedicated `HERMES_RESEARCHER_API_KEY` authentication; the Assistant remains on `HERMES_API_KEY` with no fallback between profiles.
 - Published to production with migration `0006_lead_research_run.sql`; publication smoke validation created no production research run.
 
+### Lead Enrichment V1 — In development / ready for review
+
+- Approved factual research evidence is deterministically regenerated into contact-field suggestions only (`email`, `phone`, `whatsapp`).
+- A human selects the suggested values; the server reloads the approved run, regenerates its suggestions and applies only matching server-side values through a controlled, audited Lead update.
+- The V1 never overwrites a different CRM value, never makes commercial changes and does not call a model.
+
 ## Frozen
 
 - Researcher V1 = **FROZEN**
@@ -133,7 +139,7 @@ Nenhuma API key, hostname atual do tunnel, secret ou token pertence a este docum
 
 ## Next
 
-Current priority: perform the first manual production research on the approved Smart Cont Lead. This was not executed during the Research Workflow publication; Scout continues to require explicit human approval before any Lead creation.
+Current priority: review and publish Lead Enrichment V1, then manually approve the Smart Cont research evidence and choose any contact values to enrich. No Smart Cont enrichment is performed automatically.
 
 ## After next
 
