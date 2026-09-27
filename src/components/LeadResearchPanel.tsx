@@ -8,6 +8,12 @@ import { useRouter } from "next/navigation";
 import { getAgentProfile } from "@/lib/agents/registry";
 import type { LeadEnrichmentApplication, LeadEnrichmentSuggestion } from "@/lib/lead-enrichment";
 import type { LeadResearchRunDto } from "@/lib/research-workflow";
+import {
+  isResearcherRuntimeOffline,
+  researcherRuntimeMessage,
+  useResearcherRuntimeStatus,
+} from "@/components/ResearcherRuntimeStatus";
+import { shouldRefreshResearcherRuntimeAfterResearchError } from "@/lib/researcher-runtime-refresh";
 
 type Props = {
   leadId: string;
@@ -43,6 +49,13 @@ function enrichmentErrorMessage(code: string) {
   return code;
 }
 
+function researchErrorMessage(code: string) {
+  if (code === "RESEARCHER_UNAVAILABLE") {
+    return "O runtime da Ana está temporariamente indisponível. Seus dados existentes do CRM permanecem intactos.";
+  }
+  return code;
+}
+
 type EnrichmentState = {
   loading: boolean;
   suggestions: LeadEnrichmentSuggestion[];
@@ -52,6 +65,8 @@ type EnrichmentState = {
 
 export function LeadResearchPanel({ leadId, hasWebsite, initialRuns, initialEnrichmentSuggestions }: Props) {
   const router = useRouter();
+  const { status: runtimeStatus, refresh: refreshRuntimeStatus } = useResearcherRuntimeStatus();
+  const runtimeOffline = isResearcherRuntimeOffline(runtimeStatus);
   const [runs, setRuns] = useState(initialRuns);
   const [selected, setSelected] = useState<Record<string, number[]>>({});
   const [enrichment, setEnrichment] = useState<Record<string, EnrichmentState>>(() => Object.fromEntries(
@@ -106,7 +121,9 @@ export function LeadResearchPanel({ leadId, hasWebsite, initialRuns, initialEnri
     try {
       replaceRun(await request(`/api/leads/${leadId}/research/runs`, {}));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "RESEARCH_WORKFLOW_FAILED");
+      const code = reason instanceof Error ? reason.message : "RESEARCH_WORKFLOW_FAILED";
+      if (shouldRefreshResearcherRuntimeAfterResearchError(code)) void refreshRuntimeStatus();
+      setError(researchErrorMessage(code));
     } finally {
       setBusy(null);
     }
@@ -197,7 +214,10 @@ export function LeadResearchPanel({ leadId, hasWebsite, initialRuns, initialEnri
       </div>
 
       {!hasWebsite ? <p className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Ana precisa de um website público para executar a Research V1.</p> : (
-        <button className="button-secondary mt-5" disabled={busy !== null} onClick={start} type="button">{busy === "start" ? "Pesquisando…" : "Pesquisar com Ana"}</button>
+        <div className="mt-5">
+          <p aria-live="polite" className={runtimeOffline ? "mb-3 text-sm text-amber-900" : "mb-3 text-sm text-muted"}>{researcherRuntimeMessage(runtimeStatus)}</p>
+          <button className="button-secondary" disabled={busy !== null || runtimeOffline} onClick={start} type="button">{busy === "start" ? "Pesquisando…" : "Pesquisar com Ana"}</button>
+        </div>
       )}
       {error && <p className="mt-3 text-sm text-red-700" role="alert">{error}</p>}
 

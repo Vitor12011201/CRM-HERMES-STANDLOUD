@@ -3,6 +3,7 @@ import Link from "next/link";
 import { AgentProfileHeader } from "@/components/AgentProfileHeader";
 import { AgentPromptPanel } from "@/components/AgentPromptPanel";
 import { AgentProfileTabs } from "@/components/AgentProfileTabs";
+import { ResearcherRuntimeStatus } from "@/components/ResearcherRuntimeStatus";
 import {
   agentProfileExecutionsEmptyMessage,
   agentProfileMemoryDescription,
@@ -30,6 +31,7 @@ export default async function TeamAgentProfilePage({ params, searchParams }: Tea
     <div className="page">
       <Link href="/team" className="mb-4 inline-flex text-sm font-medium text-brand hover:underline">← Voltar para equipe</Link>
       <AgentProfileHeader profile={profile} />
+      {profile.technicalId === "researcher" && <ResearcherRuntimeStatus />}
 
       <div className="mt-6">
         <AgentProfileTabs technicalId={profile.technicalId} activeTab={activeTab} />

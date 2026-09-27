@@ -6,10 +6,18 @@ const mocks = vi.hoisted(() => ({
   approveLeadResearchRun: vi.fn(),
   rejectLeadResearchRun: vi.fn(),
   toLeadResearchRunDto: vi.fn((value) => value),
+  getResearcherRuntimeStatus: vi.fn(),
 }));
 
 vi.mock("cloudflare:workers", () => ({ env: {} }));
 vi.mock("@/lib/auth/api", () => ({ requireApiSession: mocks.requireApiSession }));
+vi.mock("@/lib/agent-runtime-status", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/agent-runtime-status")>();
+  return {
+    ...actual,
+    getResearcherRuntimeStatus: mocks.getResearcherRuntimeStatus,
+  };
+});
 vi.mock("@/lib/research-workflow", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/research-workflow")>();
   return {
@@ -43,6 +51,11 @@ describe("lead research workflow API", () => {
     mocks.startLeadResearch.mockResolvedValue({ id: "run-1" });
     mocks.approveLeadResearchRun.mockResolvedValue({ id: "run-1" });
     mocks.rejectLeadResearchRun.mockResolvedValue({ id: "run-1" });
+    mocks.getResearcherRuntimeStatus.mockResolvedValue({
+      technicalId: "researcher",
+      status: "ONLINE",
+      checkedAt: "2026-09-26T00:00:00.000Z",
+    });
   });
 
   it("requires a session before start, approval, or rejection", async () => {
@@ -54,6 +67,7 @@ describe("lead research workflow API", () => {
     expect(mocks.startLeadResearch).not.toHaveBeenCalled();
     expect(mocks.approveLeadResearchRun).not.toHaveBeenCalled();
     expect(mocks.rejectLeadResearchRun).not.toHaveBeenCalled();
+    expect(mocks.getResearcherRuntimeStatus).not.toHaveBeenCalled();
   });
 
   it("accepts no browser source facts when starting research", async () => {
@@ -70,6 +84,7 @@ describe("lead research workflow API", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "RESEARCH_START_INPUT_INVALID" });
     expect(mocks.startLeadResearch).not.toHaveBeenCalled();
+    expect(mocks.getResearcherRuntimeStatus).not.toHaveBeenCalled();
   });
 
   it("does not accept commercial evidence payloads for approve or reject", async () => {
@@ -87,5 +102,34 @@ describe("lead research workflow API", () => {
     expect(rejection.status).toBe(400);
     expect(mocks.approveLeadResearchRun).not.toHaveBeenCalled();
     expect(mocks.rejectLeadResearchRun).not.toHaveBeenCalled();
+  });
+
+  it.each(["OFFLINE", "UNAVAILABLE", "CONFIGURATION_ERROR"] as const)("fails fast for definitely unavailable status %s before any workflow work begins", async (status) => {
+    mocks.getResearcherRuntimeStatus.mockResolvedValue({
+      technicalId: "researcher",
+      status,
+      checkedAt: "2026-09-26T00:00:00.000Z",
+    });
+
+    const response = await start(request("/api/leads/lead-1/research/runs", {}), { params: startParams });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "RESEARCHER_UNAVAILABLE" });
+    // startLeadResearch owns acquisition, Browser Run, model calls, and run persistence.
+    expect(mocks.startLeadResearch).not.toHaveBeenCalled();
+    expect(mocks.getResearcherRuntimeStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows an UNKNOWN runtime status to preserve the existing attempt behavior", async () => {
+    mocks.getResearcherRuntimeStatus.mockResolvedValue({
+      technicalId: "researcher",
+      status: "UNKNOWN",
+      checkedAt: "2026-09-26T00:00:00.000Z",
+    });
+
+    const response = await start(request("/api/leads/lead-1/research/runs", {}), { params: startParams });
+
+    expect(response.status).toBe(201);
+    expect(mocks.startLeadResearch).toHaveBeenCalledWith("lead-1");
   });
 });
