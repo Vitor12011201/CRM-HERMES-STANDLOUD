@@ -86,6 +86,94 @@ enum ScoutCandidateReviewStatus {
   CONVERTED
 }
 
+enum CandidateStatus {
+  DISCOVERED
+  UNCERTAIN
+  RESEARCH
+  DISCARD
+}
+
+enum CommercialCaseStage {
+  RESEARCH
+  DIAGNOSIS
+  OPPORTUNITY
+  DEMO
+  OUTREACH
+  SALES
+  CLOSED
+}
+
+enum ActorCategory {
+  HUMAN
+  SYSTEM
+  AI
+  TOOL_ENABLED_AI
+  EXTERNAL_PARTY
+}
+
+enum MigrationLedgerState {
+  PENDING
+  APPLIED
+  SKIPPED
+  AMBIGUOUS
+  FAILED
+  RECONCILE_REQUIRED
+}
+
+enum MigrationConsequenceKind {
+  CREATED
+  ASSOCIATED
+  VERIFIED_PREEXISTING
+}
+
+enum AuthoritySubjectVersionKind {
+  NON_VERSIONED
+  EXACT_VERSION
+}
+
+enum AuthorityPolicyRecordKind {
+  POLICY
+  REVOCATION
+}
+
+enum AuthorityMode {
+  POLICY_GOVERNED
+  DELEGATED
+  HUMAN_GATED
+}
+
+enum PriorDecisionDisposition {
+  PRESERVE
+  INVALIDATE
+}
+
+enum ExecutorEligibilityRuleSetRecordKind {
+  RULESET
+  DISABLED
+}
+
+enum ExecutorEligibilityVerdict {
+  ELIGIBLE
+  CONDITIONAL
+  INELIGIBLE
+}
+
+enum ExecutorType {
+  HUMAN_EXECUTOR
+  DETERMINISTIC_SYSTEM
+  REASONING_AI
+  TOOL_ENABLED_AI
+}
+
+enum AuthorityRelationKind {
+  SUPERSEDES
+  REVOKES
+}
+
+enum AuthorityInvocationOutcome {
+  AUTHORIZED
+}
+
 model Lead {
   id                 String         @id @default(cuid())
   companyName        String
@@ -277,4 +365,367 @@ model AgentPromptVersion {
 
   @@unique([technicalId, version])
   @@index([technicalId, createdAt])
+}
+
+model Experiment {
+  id              String           @id @default(uuid())
+  createdAt       DateTime         @default(now())
+  candidates      Candidate[]
+  commercialCases CommercialCase[]
+}
+
+model Business {
+  id              String           @id @default(uuid())
+  createdAt       DateTime         @default(now())
+  candidates      Candidate[]
+  commercialCases CommercialCase[]
+  contacts        Contact[]
+  contactPoints   ContactPoint[]
+}
+
+model Candidate {
+  id             String                  @id @default(uuid())
+  experimentId   String
+  businessId     String?
+  status         CandidateStatus         @default(DISCOVERED)
+  discoveryTrace String
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  experiment     Experiment              @relation(fields: [experimentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  business       Business?               @relation(fields: [businessId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  caseOrigins    CommercialCaseOrigin[]
+
+  @@index([experimentId])
+  @@index([businessId])
+}
+
+model CommercialCase {
+  id           String                  @id @default(uuid())
+  experimentId String
+  businessId   String
+  stage        CommercialCaseStage     @default(RESEARCH)
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  experiment   Experiment              @relation(fields: [experimentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  business     Business                @relation(fields: [businessId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  origins      CommercialCaseOrigin[]
+
+  @@index([experimentId])
+  @@index([businessId])
+}
+
+model CommercialCaseOrigin {
+  commercialCaseId String
+  candidateId      String
+  createdAt        DateTime       @default(now())
+  commercialCase   CommercialCase @relation(fields: [commercialCaseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  candidate        Candidate       @relation(fields: [candidateId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([commercialCaseId, candidateId])
+  @@index([candidateId])
+}
+
+model Contact {
+  id            String         @id @default(uuid())
+  businessId    String
+  createdAt     DateTime       @default(now())
+  business      Business       @relation(fields: [businessId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  contactPoints ContactPoint[] @relation("ContactPointContact")
+
+  @@unique([id, businessId])
+  @@index([businessId])
+}
+
+model ContactPoint {
+  id                String   @id @default(uuid())
+  businessId        String
+  contactId         String?
+  contactBusinessId String?
+  kind              String
+  address           String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  contact           Contact? @relation("ContactPointContact", fields: [contactId, contactBusinessId], references: [id, businessId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([businessId])
+  @@index([contactId, contactBusinessId])
+}
+
+model Actor {
+  id                    String                     @id @default(uuid())
+  category              ActorCategory
+  createdAt             DateTime                   @default(now())
+  bootstrapReceipt      AuthorityBootstrapReceipt? @relation("AuthorityBootstrapPrincipal")
+  decisions             Decision[]                 @relation("DecisionActor")
+  delegatedBy           DelegationGrant[]          @relation("DelegationGrantingActor")
+  delegatedTo           DelegationGrant[]          @relation("DelegationDelegateActor")
+  authorityInvocations  AuthorityInvocation[]      @relation("AuthorityInvocationExecutorActor")
+}
+
+model AuthorityBootstrapReceipt {
+  bootstrapKey      String   @id
+  manifestVersion   String   @unique
+  manifestSha256    String   @unique
+  manifestSourceRef String
+  principalActorId  String   @unique
+  provisionedAt     DateTime
+  principalActor    Actor    @relation("AuthorityBootstrapPrincipal", fields: [principalActorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  policyVersions    AuthorityPolicyVersion[]
+  ruleSetVersions   ExecutorEligibilityRuleSetVersion[]
+}
+
+model AuthoritySubjectRef {
+  id                     String                    @id @default(uuid())
+  registryVersion        String
+  subjectType            String
+  subjectId              String
+  versionKind            AuthoritySubjectVersionKind
+  versionToken           String?
+  descriptorFormat       String
+  canonicalKey           String                    @unique
+  descriptorSha256       String
+  createdAt              DateTime                  @default(now())
+  decisions              Decision[]                @relation("DecisionSubject")
+  scopeRootDecisions     Decision[]                @relation("DecisionScopeRootSubject")
+  delegationScopes       DelegationGrant[]         @relation("DelegationScopeRootSubject")
+  invocationSubjects     AuthorityInvocation[]     @relation("AuthorityInvocationSubject")
+  invocationCaseSubjects AuthorityInvocation[]     @relation("AuthorityInvocationCaseSubject")
+
+  @@index([subjectType, subjectId])
+}
+
+model AuthorityPolicyVersion {
+  id                       String                   @id @default(uuid())
+  policyKey                String
+  revision                 Int
+  predecessorPolicyVersionId String?
+  recordKind               AuthorityPolicyRecordKind
+  normativeActionKey       String
+  authorityMode            AuthorityMode
+  scopeSchemaKey           String
+  scopeSchemaVersion       String
+  definitionJson           String?
+  contentSha256            String
+  priorDecisionDisposition PriorDecisionDisposition
+  bootstrapKey             String?
+  governanceDecisionId     String?
+  reasonCode               String?
+  createdAt                DateTime                 @default(now())
+  predecessor              AuthorityPolicyVersion?  @relation("AuthorityPolicyVersionChain", fields: [predecessorPolicyVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  successors               AuthorityPolicyVersion[] @relation("AuthorityPolicyVersionChain")
+  bootstrapReceipt         AuthorityBootstrapReceipt? @relation(fields: [bootstrapKey], references: [bootstrapKey], onDelete: Restrict, onUpdate: Restrict)
+  governanceDecision       Decision?                @relation("PolicyGovernanceDecision", fields: [governanceDecisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  basisDecisions           Decision[]               @relation("DecisionBasisPolicy")
+  grantedDelegations       DelegationGrant[]        @relation("DelegationGrantedPolicy")
+  grantingDelegations      DelegationGrant[]        @relation("DelegationGrantingPolicy")
+  authorityInvocations     AuthorityInvocation[]    @relation("AuthorityInvocationPolicy")
+
+  @@unique([policyKey, revision])
+  @@index([policyKey, predecessorPolicyVersionId])
+}
+
+model ExecutorEligibilityRuleSetVersion {
+  id                         String                              @id @default(uuid())
+  ruleSetKey                 String
+  revision                   Int
+  predecessorRuleSetVersionId String?
+  recordKind                 ExecutorEligibilityRuleSetRecordKind
+  contractCatalogRevision    String
+  contentSha256              String
+  bootstrapKey               String?
+  governanceDecisionId       String?
+  createdAt                  DateTime                            @default(now())
+  predecessor                ExecutorEligibilityRuleSetVersion?  @relation("ExecutorEligibilityRuleSetVersionChain", fields: [predecessorRuleSetVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  successors                 ExecutorEligibilityRuleSetVersion[] @relation("ExecutorEligibilityRuleSetVersionChain")
+  bootstrapReceipt           AuthorityBootstrapReceipt?           @relation(fields: [bootstrapKey], references: [bootstrapKey], onDelete: Restrict, onUpdate: Restrict)
+  governanceDecision         Decision?                            @relation("EligibilityRuleSetGovernanceDecision", fields: [governanceDecisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  rules                      ExecutorEligibilityRule[]
+  authorityInvocations       AuthorityInvocation[]                @relation("AuthorityInvocationEligibilityRuleSet")
+
+  @@unique([ruleSetKey, revision])
+  @@index([ruleSetKey, predecessorRuleSetVersionId])
+}
+
+model ExecutorEligibilityRule {
+  id                  String                           @id @default(uuid())
+  ruleSetVersionId    String
+  capabilityKey       String
+  contractVariantKey  String
+  executorType        ExecutorType
+  verdict             ExecutorEligibilityVerdict
+  conditionsSchemaKey String?
+  conditionsJson      String?
+  ruleSha256          String
+  createdAt           DateTime                         @default(now())
+  ruleSetVersion      ExecutorEligibilityRuleSetVersion @relation(fields: [ruleSetVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  authorityInvocations AuthorityInvocation[]           @relation("AuthorityInvocationEligibilityRule")
+
+  @@unique([ruleSetVersionId, capabilityKey, contractVariantKey, executorType])
+  @@unique([id, ruleSetVersionId])
+}
+
+model Decision {
+  id                     String                   @id @default(uuid())
+  decisionRequestKey     String                   @unique
+  normativeActionKey     String
+  outcomeKey             String
+  decidingActorId        String
+  subjectRefId           String
+  scopeRootSubjectRefId  String?
+  basisPolicyVersionId   String
+  basisDelegationGrantId String?
+  conditionsSchemaKey    String?
+  conditionsJson         String?
+  conditionsSha256       String?
+  issuedAt               DateTime
+  createdAt              DateTime                 @default(now())
+  decidingActor          Actor                    @relation("DecisionActor", fields: [decidingActorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  subjectRef             AuthoritySubjectRef      @relation("DecisionSubject", fields: [subjectRefId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  scopeRootSubjectRef    AuthoritySubjectRef?     @relation("DecisionScopeRootSubject", fields: [scopeRootSubjectRefId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  basisPolicyVersion     AuthorityPolicyVersion   @relation("DecisionBasisPolicy", fields: [basisPolicyVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  basisDelegationGrant   DelegationGrant?         @relation("DecisionBasisDelegation", fields: [basisDelegationGrantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  governedPolicies       AuthorityPolicyVersion[] @relation("PolicyGovernanceDecision")
+  governedRuleSets       ExecutorEligibilityRuleSetVersion[] @relation("EligibilityRuleSetGovernanceDecision")
+  effectingRelations     AuthorityRelation[]      @relation("AuthorityRelationEffectingDecision")
+  targetRelations        AuthorityRelation[]      @relation("AuthorityRelationTargetDecision")
+  grantingDelegations    DelegationGrant[]        @relation("DelegationGrantingDecision")
+  authorityInvocations   AuthorityInvocation[]    @relation("AuthorityInvocationDecision")
+
+  @@index([subjectRefId, normativeActionKey])
+  @@index([basisPolicyVersionId])
+}
+
+model DelegationGrant {
+  id                      String                   @id @default(uuid())
+  grantRequestKey         String                   @unique
+  grantedPolicyVersionId  String
+  delegatorActorId        String?
+  delegateActorId         String
+  scopeRootSubjectRefId   String
+  scopeSchemaKey          String
+  scopeJson               String?
+  scopeSha256             String?
+  validFrom               DateTime
+  validUntil              DateTime?
+  grantingPolicyVersionId String?
+  grantingDecisionId      String?
+  createdAt               DateTime                 @default(now())
+  grantedPolicyVersion    AuthorityPolicyVersion   @relation("DelegationGrantedPolicy", fields: [grantedPolicyVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  delegatorActor          Actor?                   @relation("DelegationGrantingActor", fields: [delegatorActorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  delegateActor           Actor                    @relation("DelegationDelegateActor", fields: [delegateActorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  scopeRootSubjectRef     AuthoritySubjectRef      @relation("DelegationScopeRootSubject", fields: [scopeRootSubjectRefId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  grantingPolicyVersion   AuthorityPolicyVersion?  @relation("DelegationGrantingPolicy", fields: [grantingPolicyVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  grantingDecision        Decision?                @relation("DelegationGrantingDecision", fields: [grantingDecisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  basisDecisions          Decision[]               @relation("DecisionBasisDelegation")
+  targetRelations         AuthorityRelation[]      @relation("AuthorityRelationTargetDelegation")
+  authorityInvocations    AuthorityInvocation[]    @relation("AuthorityInvocationDelegation")
+
+  @@index([delegateActorId, grantedPolicyVersionId, validFrom])
+}
+
+model AuthorityRelation {
+  id                      String                @id @default(uuid())
+  effectingDecisionId     String
+  relationKind            AuthorityRelationKind
+  targetDecisionId        String?
+  targetDelegationGrantId String?
+  createdAt               DateTime              @default(now())
+  effectingDecision       Decision              @relation("AuthorityRelationEffectingDecision", fields: [effectingDecisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  targetDecision          Decision?             @relation("AuthorityRelationTargetDecision", fields: [targetDecisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  targetDelegationGrant   DelegationGrant?      @relation("AuthorityRelationTargetDelegation", fields: [targetDelegationGrantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([targetDecisionId])
+  @@index([targetDelegationGrantId])
+}
+
+model AuthorityInvocation {
+  id                          String                           @id @default(uuid())
+  invocationKey               String                           @unique
+  canonicalRequestSha256      String
+  normativeActionKey          String
+  capabilityKey               String
+  contractVariantKey          String?
+  executorActorId             String
+  executorType                ExecutorType
+  subjectRefId                String
+  caseSubjectRefId            String?
+  policyVersionId             String
+  eligibilityRuleSetVersionId String
+  eligibilityRuleId           String
+  decisionId                  String?
+  delegationGrantId           String?
+  outcome                     AuthorityInvocationOutcome
+  lineageSha256               String
+  evaluatedAt                 DateTime
+  createdAt                   DateTime                         @default(now())
+  executorActor               Actor                            @relation("AuthorityInvocationExecutorActor", fields: [executorActorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  subjectRef                  AuthoritySubjectRef              @relation("AuthorityInvocationSubject", fields: [subjectRefId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  caseSubjectRef              AuthoritySubjectRef?             @relation("AuthorityInvocationCaseSubject", fields: [caseSubjectRefId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  policyVersion               AuthorityPolicyVersion           @relation("AuthorityInvocationPolicy", fields: [policyVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  eligibilityRuleSetVersion   ExecutorEligibilityRuleSetVersion @relation("AuthorityInvocationEligibilityRuleSet", fields: [eligibilityRuleSetVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  eligibilityRule             ExecutorEligibilityRule          @relation("AuthorityInvocationEligibilityRule", fields: [eligibilityRuleId, eligibilityRuleSetVersionId], references: [id, ruleSetVersionId], onDelete: Restrict, onUpdate: Restrict)
+  decision                    Decision?                        @relation("AuthorityInvocationDecision", fields: [decisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  delegationGrant             DelegationGrant?                 @relation("AuthorityInvocationDelegation", fields: [delegationGrantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([subjectRefId, normativeActionKey])
+  @@index([policyVersionId])
+}
+
+model MigrationUnit {
+  id                   String               @id @default(uuid())
+  logicalKeySha256     String               @unique
+  sourceSystem         String
+  sourceType           String
+  sourceId             String
+  targetResponsibility String
+  ruleVersion          String
+  state                MigrationLedgerState
+  lastFingerprint      String
+  fingerprintFormat    String
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  attempts             MigrationAttempt[]
+  targetRefs           MigrationTargetRef[] @relation("MigrationUnitTargetRefs")
+
+  @@unique([sourceSystem, sourceType, sourceId, targetResponsibility, ruleVersion])
+  @@index([sourceType, sourceId])
+  @@index([state, updatedAt])
+}
+
+model MigrationAttempt {
+  id                    String               @id @default(uuid())
+  migrationUnitId       String
+  state                 MigrationLedgerState
+  sourceFingerprint     String
+  fingerprintFormat     String
+  sourceProvenanceJson  String
+  reasonCode            String?
+  outcomeEvidenceJson   String?
+  failureEvidenceJson   String?
+  startedAt             DateTime             @default(now())
+  completedAt           DateTime?
+  migrationUnit         MigrationUnit        @relation(fields: [migrationUnitId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  establishedTargetRefs MigrationTargetRef[] @relation("MigrationAttemptEstablishedTargetRefs")
+
+  @@unique([id, migrationUnitId])
+  @@index([migrationUnitId, startedAt])
+  @@index([state, startedAt])
+}
+
+model MigrationTargetRef {
+  id                    String                     @id @default(uuid())
+  migrationUnitId       String
+  establishedByAttemptId String
+  targetType            String
+  targetKeyFormat       String
+  targetKey             String
+  consequenceKind       MigrationConsequenceKind
+  createdAt             DateTime                   @default(now())
+  migrationUnit         MigrationUnit              @relation("MigrationUnitTargetRefs", fields: [migrationUnitId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  establishedByAttempt  MigrationAttempt           @relation("MigrationAttemptEstablishedTargetRefs", fields: [establishedByAttemptId, migrationUnitId], references: [id, migrationUnitId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([migrationUnitId, targetType, targetKey, consequenceKind])
+  @@index([targetType, targetKey])
+  @@index([establishedByAttemptId])
 }
