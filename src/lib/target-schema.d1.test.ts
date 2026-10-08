@@ -143,8 +143,8 @@ describe("TR-01C real disposable D1 target schema", () => {
     if (temporaryRoot) rmSync(temporaryRoot, { recursive: true, force: true });
   });
 
-  it("bootstraps all eleven migrations with target tables, indexes, and triggers", async () => {
-    expect(await countRows("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(11);
+  it("bootstraps all twelve migrations with target tables, indexes, and triggers", async () => {
+    expect(await countRows("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(12);
     expect(await countRows("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'table' AND name IN ('Experiment', 'Business', 'Candidate', 'CommercialCase', 'CommercialCaseOrigin', 'Contact', 'ContactPoint', 'Actor')")).toBe(8);
     expect(await countRows("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'trigger' AND name IN ('CommercialCase_birth_requires_research', 'CommercialCaseOrigin_insert_requires_coherent_candidate', 'Candidate_origin_lineage_immutable', 'CommercialCase_origin_identity_immutable')")).toBe(4);
     expect(await countRows("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'index' AND name = 'CommercialCaseOrigin_candidateId_idx'")).toBe(1);
@@ -258,7 +258,7 @@ describe("TR-01C real disposable D1 target schema", () => {
     expect(await countRows("SELECT COUNT(*) AS total FROM \"Actor\"")).toBe(5);
   }, 120_000);
 
-  it("reapplies 0001 through 0011 as a no-op on the clean disposable state", () => {
+  it("reapplies 0001 through 0012 as a no-op on the clean disposable state", () => {
     const output = runWrangler([
       "d1",
       "migrations",

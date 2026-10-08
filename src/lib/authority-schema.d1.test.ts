@@ -180,7 +180,7 @@ describe("TR-03B real disposable D1 authority kernel", () => {
     if (temporaryRoot) rmSync(temporaryRoot, { recursive: true, force: true });
   });
 
-  it("cleanly bootstraps 0001 through 0011 with exactly the authority-kernel tables and no authority rows", async () => {
+  it("cleanly bootstraps 0001 through 0012 with exactly the authority-kernel tables and no authority rows", async () => {
     const authorityTables = [
       "AuthorityBootstrapReceipt",
       "AuthoritySubjectRef",
@@ -193,7 +193,7 @@ describe("TR-03B real disposable D1 authority kernel", () => {
       "AuthorityInvocation",
     ];
     const quotedTables = authorityTables.map(quote).join(", ");
-    expect(await countRows("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(11);
+    expect(await countRows("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(12);
     expect(await countRows(`SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'table' AND name IN (${quotedTables})`)).toBe(9);
     expect(await countRows("SELECT COUNT(*) AS total FROM \"AuthorityBootstrapReceipt\"")).toBe(0);
     expect(await countRows("SELECT COUNT(*) AS total FROM \"AuthorityInvocation\"")).toBe(0);
@@ -554,7 +554,7 @@ INSERT INTO "AuthorityCommitGuardDependent" ("id", "phase") VALUES ('guarded-dep
     await expectSqlFailure(`DELETE FROM "Actor" WHERE "id" = 'actor-human'`, "ACTOR_DELETE_FORBIDDEN");
   });
 
-  it("reapplies 0001 through 0011 as a no-op", () => {
+  it("reapplies 0001 through 0012 as a no-op", () => {
     const output = runWrangler([
       "d1",
       "migrations",

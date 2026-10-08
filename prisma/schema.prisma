@@ -180,6 +180,16 @@ enum ExecutionRunStatus {
   FAILED
 }
 
+enum CostMeasurementNature {
+  ESTIMATED
+  ACTUAL
+}
+
+enum CostKnowledge {
+  KNOWN
+  UNKNOWN
+}
+
 model Lead {
   id                 String         @id @default(cuid())
   companyName        String
@@ -378,6 +388,7 @@ model Experiment {
   createdAt       DateTime         @default(now())
   candidates      Candidate[]
   commercialCases CommercialCase[]
+  costEntries     CostEntry[]      @relation("CostEntryExperiment")
 }
 
 model Business {
@@ -400,6 +411,7 @@ model Candidate {
   experiment     Experiment              @relation(fields: [experimentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   business       Business?               @relation(fields: [businessId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   caseOrigins    CommercialCaseOrigin[]
+  costEntries    CostEntry[]              @relation("CostEntryCandidate")
 
   @@index([experimentId])
   @@index([businessId])
@@ -415,6 +427,7 @@ model CommercialCase {
   experiment   Experiment              @relation(fields: [experimentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   business     Business                @relation(fields: [businessId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   origins      CommercialCaseOrigin[]
+  costEntries  CostEntry[]             @relation("CostEntryCommercialCase")
 
   @@index([experimentId])
   @@index([businessId])
@@ -709,12 +722,55 @@ model ExecutionRun {
   executorActor          Actor                @relation("ExecutionRunExecutorActor", fields: [executorActorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   authorityInvocation    AuthorityInvocation? @relation("ExecutionRunAuthorityInvocation", fields: [authorityInvocationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   authoritySubjectRef    AuthoritySubjectRef? @relation("ExecutionRunAuthoritySubject", fields: [authoritySubjectRefId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  costEntries            CostEntry[]          @relation("CostEntryExecutionRun")
 
   @@unique([executionRequestKey, attemptNumber])
   @@index([executionRequestKey])
   @@index([status, startedAt])
   @@index([executorActorId, startedAt])
   @@index([authorityInvocationId])
+}
+
+/// Immutable, schema-only economic measurement storage. It has no writer or
+/// authority binding in this slice; constraints are enforced by migration 0012.
+model CostEntry {
+  id                       String                @id @default(uuid())
+  costEntryKey             String                @unique
+  canonicalCostEntrySha256 String
+  economicOccurrenceKey    String
+  measurementSliceKey      String                @unique
+  measurementNature        CostMeasurementNature
+  resourceKey              String
+  unitKey                  String
+  quantityKnowledge        CostKnowledge
+  quantityCoefficient      BigInt?
+  quantityScale            Int?
+  monetaryKnowledge        CostKnowledge
+  amountMinor              BigInt?
+  currency                 String?
+  currencyScale            Int?
+  measurementSourceKind    String
+  sourceReference          String?
+  evidenceSha256           String?
+  measurementBasisSha256   String
+  occurredAt               DateTime?
+  observedAt               DateTime?
+  recordedAt               DateTime
+  createdAt                DateTime              @default(now())
+  experimentId             String?
+  candidateId              String?
+  commercialCaseId         String?
+  executionRunId           String?
+  experiment               Experiment?           @relation("CostEntryExperiment", fields: [experimentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  candidate                Candidate?            @relation("CostEntryCandidate", fields: [candidateId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  commercialCase           CommercialCase?       @relation("CostEntryCommercialCase", fields: [commercialCaseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  executionRun             ExecutionRun?         @relation("CostEntryExecutionRun", fields: [executionRunId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([economicOccurrenceKey])
+  @@index([experimentId])
+  @@index([candidateId])
+  @@index([commercialCaseId])
+  @@index([executionRunId])
 }
 
 model MigrationUnit {

@@ -261,8 +261,8 @@ describe("ExecutionRun D1 kernel", () => {
     }
   });
 
-  it("applies migration 0011 cleanly with the intended table, indexes, and guards", async () => {
-    expect(await scalar("SELECT COUNT(*) AS value FROM d1_migrations")).toBe(11);
+  it("keeps migration 0011 ExecutionRun structures intact in the current schema", async () => {
+    expect(await scalar("SELECT COUNT(*) AS value FROM d1_migrations")).toBe(12);
     expect(await scalar("SELECT COUNT(*) AS value FROM sqlite_master WHERE type = 'table' AND name = 'ExecutionRun'")).toBe(1);
     expect(
       await scalar(
@@ -423,13 +423,17 @@ describe("ExecutionRun D1 kernel", () => {
     );
   }, 120_000);
 
-  it("does not create WorkflowEvent or CostEntry coupling", async () => {
-    expect(
-      await scalar("SELECT COUNT(*) AS value FROM sqlite_master WHERE type = 'table' AND name IN ('WorkflowEvent', 'CostEntry')"),
-    ).toBe(0);
+  it("keeps WorkflowEvent and deferred cost extensions absent while ExecutionRun statuses never create CostEntry", async () => {
+    expect(await scalar("SELECT COUNT(*) AS value FROM sqlite_master WHERE type = 'table' AND name = 'WorkflowEvent'"))
+      .toBe(0);
+    expect(await scalar("SELECT COUNT(*) AS value FROM sqlite_master WHERE type = 'table' AND name = 'CostEntry'"))
+      .toBe(1);
+    expect(await scalar("SELECT COUNT(*) AS value FROM sqlite_master WHERE type = 'table' AND name IN ('CostEntryAttribution', 'CostReconciliation')"))
+      .toBe(0);
+    expect(await scalar("SELECT COUNT(*) AS value FROM CostEntry")).toBe(0);
   }, 120_000);
 
-  it("reapplying migration 0011 to the active database is a no-op", () => {
+  it("reapplying active migrations through 0012 is a no-op", () => {
     expect(
       runWrangler([
         "d1",
