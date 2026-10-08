@@ -152,6 +152,13 @@ function costEntryInsert(input: CostEntryInsert) {
   return `INSERT INTO "CostEntry" (${columns.map((column) => `"${column}"`).join(", ")}) VALUES (${values.join(", ")})`;
 }
 
+function replaceSqlLiteral(statement: string, literal: string, expression: string) {
+  const expected = quote(literal);
+  const index = statement.indexOf(expected);
+  if (index < 0) throw new Error(`COST_ENTRY_TEST_LITERAL_NOT_FOUND:${literal}`);
+  return `${statement.slice(0, index)}${expression}${statement.slice(index + expected.length)}`;
+}
+
 function writeLegacyConfig(directory: string) {
   const configPath = join(directory, "wrangler.json");
   writeFileSync(configPath, JSON.stringify({
@@ -168,7 +175,7 @@ function writeLegacyConfig(directory: string) {
 }
 
 describe("TR-04 CostEntry D1 restricted storage core", () => {
-  describe("current 0012 fixture", () => {
+  describe("current 0013 fixture", () => {
     beforeAll(() => {
       temporaryRoot = mkdtempSync(join(tmpdir(), "standloud-cost-entry-"));
       persistenceDirectory = join(temporaryRoot, "clean-persist");
@@ -189,12 +196,12 @@ describe("TR-04 CostEntry D1 restricted storage core", () => {
       if (temporaryRoot) rmSync(temporaryRoot, { recursive: true, force: true });
     });
 
-  it("bootstraps 0001 through 0012 with only the approved cost table, indexes, FKs, and guards", () => {
-    expect(scalar("SELECT COUNT(*) AS value FROM d1_migrations")).toBe(12);
+  it("bootstraps 0001 through 0013 with only the approved cost table, indexes, FKs, and guards", () => {
+    expect(scalar("SELECT COUNT(*) AS value FROM d1_migrations")).toBe(13);
     expect(scalar("SELECT COUNT(*) AS value FROM sqlite_master WHERE type = 'table' AND name = 'CostEntry'")).toBe(1);
     expect(scalar("SELECT COUNT(*) AS value FROM sqlite_master WHERE type = 'table' AND name IN ('WorkflowEvent', 'CostEntryAttribution', 'CostReconciliation')")).toBe(0);
     expect(scalar("SELECT COUNT(*) AS value FROM sqlite_master WHERE type = 'index' AND name IN ('CostEntry_economicOccurrenceKey_idx', 'CostEntry_experimentId_idx', 'CostEntry_candidateId_idx', 'CostEntry_commercialCaseId_idx', 'CostEntry_executionRunId_idx')")).toBe(5);
-    expect(scalar("SELECT COUNT(*) AS value FROM sqlite_master WHERE type = 'trigger' AND name IN ('CostEntry_update_forbidden', 'CostEntry_delete_forbidden')")).toBe(2);
+    expect(scalar("SELECT COUNT(*) AS value FROM sqlite_master WHERE type = 'trigger' AND name IN ('CostEntry_update_forbidden', 'CostEntry_delete_forbidden', 'CostEntry_insert_format_guard')")).toBe(3);
     expect(scalar("SELECT COUNT(*) AS value FROM pragma_foreign_key_list('CostEntry') WHERE on_delete = 'RESTRICT' AND on_update = 'RESTRICT'")).toBe(4);
   }, 120_000);
 
@@ -324,6 +331,69 @@ describe("TR-04 CostEntry D1 restricted storage core", () => {
     expectFailure(costEntryInsert({ id: "cost-unknown-money-currency", costEntryKey: "cost:unknown:money:currency", measurementSliceKey: "slice:unknown:money:currency", monetaryKnowledge: "UNKNOWN", amountMinor: null, currency: "BRL", currencyScale: null }));
   }, 120_000);
 
+  it("rejects malformed physical hash and currency formats through direct D1 INSERTs", () => {
+    type CostEntryOverrides = Omit<CostEntryInsert, "id" | "costEntryKey" | "measurementSliceKey">;
+    const identifiers = (label: string) => ({
+      id: `cost-format-${label}`,
+      costEntryKey: `cost:format:${label}`,
+      measurementSliceKey: `slice:format:${label}`,
+    });
+    const direct = (label: string, literal: string, expression: string, overrides: CostEntryOverrides = {}) =>
+      replaceSqlLiteral(costEntryInsert({ ...identifiers(label), ...overrides }), literal, expression);
+    const malformed = "COST_ENTRY_INSERT_FORMAT_INVALID";
+    const blob = `CAST(x'${"61".repeat(62)}00ff' AS BLOB)`;
+    const hashFields: Array<{ label: string; value: string; overrides: CostEntryOverrides }> = [
+      { label: "canonical", value: sha("1"), overrides: { canonicalCostEntrySha256: sha("1") } },
+      { label: "basis", value: sha("2"), overrides: { measurementBasisSha256: sha("2") } },
+      { label: "evidence", value: sha("3"), overrides: { evidenceSha256: sha("3") } },
+    ];
+
+    for (const field of hashFields) {
+      expectFailure(
+        direct(`${field.label}-nul-trailing`, field.value, `${quote(field.value)} || char(0)`, field.overrides),
+        malformed,
+      );
+      expectFailure(
+        direct(
+          `${field.label}-nul-embedded`,
+          field.value,
+          `substr(${quote(field.value)}, 1, 32) || char(0) || substr(${quote(field.value)}, 33) || 'tail'`,
+          field.overrides,
+        ),
+        malformed,
+      );
+      expectFailure(direct(`${field.label}-blob`, field.value, blob, field.overrides), malformed);
+    }
+
+    for (const [label, expression] of [
+      ["number", "1"],
+      ["uppercase", quote("A".repeat(64))],
+      ["nonhex", quote(`${"a".repeat(63)}g`)],
+      ["multibyte", quote(`${"a".repeat(63)}\u00e9`)],
+      ["short", quote("a".repeat(63))],
+      ["long", quote("a".repeat(65))],
+    ]) {
+      expectFailure(direct(`canonical-${label}`, sha("4"), expression, { canonicalCostEntrySha256: sha("4") }), malformed);
+    }
+
+    for (const [label, expression] of [
+      ["nul", "'USD' || char(0) || 'FAKE'"],
+      ["blob", "CAST(x'555344' AS BLOB)"],
+      ["lowercase", "'usd'"],
+      ["mixed", "'UsD'"],
+      ["short", "'US'"],
+      ["long", "'USDD'"],
+      ["multibyte", "'U\u00e9D'"],
+    ]) {
+      expectFailure(direct(`currency-${label}`, "BRL", expression), malformed);
+    }
+
+    expectFailure(
+      direct("evidence-invalid-with-source", sha("5"), quote("A".repeat(64)), { evidenceSha256: sha("5") }),
+      malformed,
+    );
+  }, 120_000);
+
   it("rejects unsafe numeric values, invalid clocks, and direct-context violations", () => {
     expectFailure(costEntryInsert({ id: "cost-negative", costEntryKey: "cost:negative", measurementSliceKey: "slice:negative", amountMinor: -1 }));
     expectFailure(costEntryInsert({ id: "cost-unsafe", costEntryKey: "cost:unsafe", measurementSliceKey: "slice:unsafe", amountMinor: 9007199254740992 }));
@@ -365,6 +435,105 @@ describe("TR-04 CostEntry D1 restricted storage core", () => {
       runWrangler(["d1", "migrations", "apply", databaseName, "--local", "--config", configPath], upgradeRoot);
       expect(Number(legacyQuery("SELECT COUNT(*) AS value FROM d1_migrations")[0]?.value)).toBe(12);
       expect(Number(legacyQuery("SELECT COUNT(*) AS value FROM sqlite_master WHERE type = 'table' AND name = 'CostEntry'")[0]?.value)).toBe(1);
+      expect(runWrangler(["d1", "migrations", "apply", databaseName, "--local", "--config", configPath], upgradeRoot)).toContain("No migrations to apply");
+    } finally {
+      rmSync(upgradeRoot, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("upgrades a disposable 0012 database through 0013 without rewriting historical rows", () => {
+    const upgradeRoot = mkdtempSync(join(tmpdir(), "standloud-cost-entry-format-upgrade-"));
+    const legacyMigrations = join(upgradeRoot, "migrations");
+    mkdirSync(legacyMigrations);
+    const configPath = writeLegacyConfig(upgradeRoot);
+    const migrationNames = [
+      "0001_init.sql", "0002_agent_audit_log.sql", "0003_lead_research.sql", "0004_scout_candidate_review.sql",
+      "0005_agent_prompt_config.sql", "0006_lead_research_run.sql", "0007_core_target_identities.sql", "0008_migration_ledger.sql",
+      "0009_authority_kernel.sql", "0010_authority_hardening.sql", "0011_execution_run_kernel.sql", "0012_cost_entry_core.sql",
+    ];
+    const strictFormatPredicate = `
+      typeof("canonicalCostEntrySha256") = 'text'
+      AND length("canonicalCostEntrySha256") = 64
+      AND length(CAST("canonicalCostEntrySha256" AS BLOB)) = 64
+      AND instr("canonicalCostEntrySha256", char(0)) = 0
+      AND "canonicalCostEntrySha256" NOT GLOB '*[^0-9a-f]*'
+      AND typeof("measurementBasisSha256") = 'text'
+      AND length("measurementBasisSha256") = 64
+      AND length(CAST("measurementBasisSha256" AS BLOB)) = 64
+      AND instr("measurementBasisSha256", char(0)) = 0
+      AND "measurementBasisSha256" NOT GLOB '*[^0-9a-f]*'
+      AND (
+        "evidenceSha256" IS NULL OR (
+          typeof("evidenceSha256") = 'text'
+          AND length("evidenceSha256") = 64
+          AND length(CAST("evidenceSha256" AS BLOB)) = 64
+          AND instr("evidenceSha256", char(0)) = 0
+          AND "evidenceSha256" NOT GLOB '*[^0-9a-f]*'
+        )
+      )
+      AND (
+        ("monetaryKnowledge" = 'KNOWN'
+          AND typeof("currency") = 'text'
+          AND length("currency") = 3
+          AND length(CAST("currency" AS BLOB)) = 3
+          AND instr("currency", char(0)) = 0
+          AND "currency" NOT GLOB '*[^A-Z]*')
+        OR ("monetaryKnowledge" = 'UNKNOWN' AND "currency" IS NULL)
+      )
+    `;
+    try {
+      for (const migration of migrationNames) {
+        cpSync(join(migrationsDirectory, migration), join(legacyMigrations, migration));
+      }
+      runWrangler(["d1", "migrations", "apply", databaseName, "--local", "--config", configPath], upgradeRoot);
+      const legacyQuery = (statement: string) => {
+        const output = runWrangler(["d1", "execute", databaseName, "--local", "--config", configPath, "--command", statement, "--json"], upgradeRoot);
+        return (JSON.parse(output) as Array<{ results?: Array<{ value: number }> }>)[0]?.results ?? [];
+      };
+      const historicalHash = sha("7");
+      const historicalMalformed = replaceSqlLiteral(
+        costEntryInsert({
+          id: "cost-0012-malformed-history",
+          costEntryKey: "cost:0012:malformed:history",
+          measurementSliceKey: "slice:0012:malformed:history",
+          canonicalCostEntrySha256: historicalHash,
+        }),
+        historicalHash,
+        `${quote(historicalHash)} || char(0) || 'history'`,
+      );
+      runWrangler(["d1", "execute", databaseName, "--local", "--config", configPath, "--command", historicalMalformed], upgradeRoot);
+      expect(Number(legacyQuery("SELECT COUNT(*) AS value FROM d1_migrations")[0]?.value)).toBe(12);
+      expect(Number(legacyQuery("SELECT length(CAST(\"canonicalCostEntrySha256\" AS BLOB)) AS value FROM \"CostEntry\" WHERE \"id\" = 'cost-0012-malformed-history'")[0]?.value)).toBe(72);
+
+      cpSync(join(migrationsDirectory, "0013_cost_entry_insert_format_guard.sql"), join(legacyMigrations, "0013_cost_entry_insert_format_guard.sql"));
+      runWrangler(["d1", "migrations", "apply", databaseName, "--local", "--config", configPath], upgradeRoot);
+      expect(Number(legacyQuery("SELECT COUNT(*) AS value FROM d1_migrations")[0]?.value)).toBe(13);
+      expect(Number(legacyQuery("SELECT COUNT(*) AS value FROM sqlite_master WHERE type = 'trigger' AND name = 'CostEntry_insert_format_guard'")[0]?.value)).toBe(1);
+      expect(Number(legacyQuery(`SELECT SUM(CASE WHEN ${strictFormatPredicate} THEN 1 ELSE 0 END) AS value FROM \"CostEntry\"`)[0]?.value)).toBe(0);
+      expect(Number(legacyQuery(`SELECT SUM(CASE WHEN ${strictFormatPredicate} THEN 0 ELSE 1 END) AS value FROM \"CostEntry\"`)[0]?.value)).toBe(1);
+      expect(Number(legacyQuery("SELECT COUNT(*) AS value FROM \"CostEntry\" WHERE \"id\" = 'cost-0012-malformed-history'")[0]?.value)).toBe(1);
+
+      let failure: unknown;
+      try {
+        const newHash = sha("8");
+        runWrangler([
+          "d1", "execute", databaseName, "--local", "--config", configPath, "--command",
+          replaceSqlLiteral(
+            costEntryInsert({
+              id: "cost-0013-malformed-new",
+              costEntryKey: "cost:0013:malformed:new",
+              measurementSliceKey: "slice:0013:malformed:new",
+              canonicalCostEntrySha256: newHash,
+            }),
+            newHash,
+            `${quote(newHash)} || char(0) || 'new'`,
+          ),
+        ], upgradeRoot);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeDefined();
+      expect(errorText(failure)).toContain("COST_ENTRY_INSERT_FORMAT_INVALID");
       expect(runWrangler(["d1", "migrations", "apply", databaseName, "--local", "--config", configPath], upgradeRoot)).toContain("No migrations to apply");
     } finally {
       rmSync(upgradeRoot, { recursive: true, force: true });

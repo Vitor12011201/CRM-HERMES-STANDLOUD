@@ -261,8 +261,8 @@ describe("ExecutionRun D1 kernel", () => {
     }
   });
 
-  it("keeps migration 0011 ExecutionRun structures intact in the current schema", async () => {
-    expect(await scalar("SELECT COUNT(*) AS value FROM d1_migrations")).toBe(12);
+  it("keeps migration 0011 ExecutionRun structures intact in the current 0013 schema", async () => {
+    expect(await scalar("SELECT COUNT(*) AS value FROM d1_migrations")).toBe(13);
     expect(await scalar("SELECT COUNT(*) AS value FROM sqlite_master WHERE type = 'table' AND name = 'ExecutionRun'")).toBe(1);
     expect(
       await scalar(
@@ -433,7 +433,7 @@ describe("ExecutionRun D1 kernel", () => {
     expect(await scalar("SELECT COUNT(*) AS value FROM CostEntry")).toBe(0);
   }, 120_000);
 
-  it("reapplying active migrations through 0012 is a no-op", () => {
+  it("reapplying active migrations through 0013 is a no-op", () => {
     expect(
       runWrangler([
         "d1",

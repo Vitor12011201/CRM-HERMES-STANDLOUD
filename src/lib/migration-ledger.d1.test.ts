@@ -219,8 +219,8 @@ describe("TR-02B real disposable D1 migration ledger", () => {
     if (temporaryRoot) rmSync(temporaryRoot, { recursive: true, force: true });
   });
 
-  it("bootstraps 0001 through 0012 without ledger rows", async () => {
-    expect(await scalar("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(12);
+  it("bootstraps 0001 through 0013 without ledger rows", async () => {
+    expect(await scalar("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(13);
     expect(await scalar("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'table' AND name IN ('MigrationUnit', 'MigrationAttempt', 'MigrationTargetRef')")).toBe(3);
     expect(await scalar("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'index' AND name = 'MigrationAttempt_one_pending_per_unit'")).toBe(1);
     expect(await scalar("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'trigger' AND name IN ('MigrationUnit_identity_immutable', 'MigrationAttempt_transition_guard', 'MigrationTargetRef_insert_pending_attempt_only')")).toBe(3);
