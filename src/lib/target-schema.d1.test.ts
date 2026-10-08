@@ -143,18 +143,18 @@ describe("TR-01C real disposable D1 target schema", () => {
     if (temporaryRoot) rmSync(temporaryRoot, { recursive: true, force: true });
   });
 
-  it("bootstraps all nine migrations with target tables, indexes, and triggers", async () => {
-    expect(await countRows("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(9);
+  it("bootstraps all ten migrations with target tables, indexes, and triggers", async () => {
+    expect(await countRows("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(10);
     expect(await countRows("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'table' AND name IN ('Experiment', 'Business', 'Candidate', 'CommercialCase', 'CommercialCaseOrigin', 'Contact', 'ContactPoint', 'Actor')")).toBe(8);
     expect(await countRows("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'trigger' AND name IN ('CommercialCase_birth_requires_research', 'CommercialCaseOrigin_insert_requires_coherent_candidate', 'Candidate_origin_lineage_immutable', 'CommercialCase_origin_identity_immutable')")).toBe(4);
     expect(await countRows("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'index' AND name = 'CommercialCaseOrigin_candidateId_idx'")).toBe(1);
     expect(await countRows("SELECT COUNT(*) AS total FROM \"Business\"")).toBe(0);
   }, 120_000);
 
-  it("upgrades a disposable 0001..0002 state through 0009 without legacy or target rows", () => {
+  it("upgrades a disposable 0001..0002 state through 0010 without legacy or target rows", () => {
     const upgradeRoot = join(temporaryRoot, "legacy-upgrade");
     const { configPath, migrationsDirectory } = createLegacyConfig(upgradeRoot);
-    const migrationFiles = ["0001_init.sql", "0002_agent_audit_log.sql", "0003_lead_research.sql", "0004_scout_candidate_review.sql", "0005_agent_prompt_config.sql", "0006_lead_research_run.sql", "0007_core_target_identities.sql", "0008_migration_ledger.sql", "0009_authority_kernel.sql"];
+    const migrationFiles = ["0001_init.sql", "0002_agent_audit_log.sql", "0003_lead_research.sql", "0004_scout_candidate_review.sql", "0005_agent_prompt_config.sql", "0006_lead_research_run.sql", "0007_core_target_identities.sql", "0008_migration_ledger.sql", "0009_authority_kernel.sql", "0010_authority_hardening.sql"];
 
     for (const migration of migrationFiles.slice(0, 2)) {
       cpSync(join(repositoryRoot, "prisma", "migrations", migration), join(migrationsDirectory, migration));
@@ -172,7 +172,7 @@ describe("TR-01C real disposable D1 target schema", () => {
       return (JSON.parse(output) as Array<{ results?: Array<Record<string, unknown>> }>)[0]?.results ?? [];
     };
     const legacyCount = (statement: string) => Number(legacyRows(statement)[0]?.total);
-    expect(legacyCount("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(9);
+    expect(legacyCount("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(10);
     expect(legacyCount("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'table' AND name = 'Lead'")).toBe(1);
     expect(legacyCount("SELECT COUNT(*) AS total FROM \"Experiment\"")).toBe(0);
   }, 120_000);
@@ -258,7 +258,7 @@ describe("TR-01C real disposable D1 target schema", () => {
     expect(await countRows("SELECT COUNT(*) AS total FROM \"Actor\"")).toBe(5);
   }, 120_000);
 
-  it("reapplies 0001 through 0009 as a no-op on the clean disposable state", () => {
+  it("reapplies 0001 through 0010 as a no-op on the clean disposable state", () => {
     const output = runWrangler([
       "d1",
       "migrations",

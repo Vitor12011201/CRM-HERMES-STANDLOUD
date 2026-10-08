@@ -69,7 +69,7 @@ export type GovernedEligibilityRuleSetVersionProposal = Readonly<{
   nextRevision: number;
   recordKind: "RULESET" | "DISABLED";
   contractCatalogRevision: string;
-  /** For RULESET this is exactly the canonical hash of childRules. */
+  /** Canonical digest of the complete version proposal, including childRules. */
   contentSha256: string;
   governanceDecisionId: string;
   childRules: readonly GovernedEligibilityRuleProposal[];
@@ -150,6 +150,12 @@ async function sha256(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (part) => part.toString(16).padStart(2, "0")).join("");
 }
 
+function canonicalJsonText(value: string | null): string | null {
+  if (value === null) return null;
+  if (!text(value)) throw new Error("GOVERNANCE_CANONICAL_JSON_INVALID");
+  return canonicalJson(JSON.parse(value) as unknown);
+}
+
 type CanonicalChildRule = Readonly<{
   id: string;
   capabilityKey: string;
@@ -197,7 +203,45 @@ export async function computeCanonicalEligibilityRuleSetChildSha256(
   return sha256(canonicalJson({ format: "authority-eligibility-child-set/v1", rules: canonical }));
 }
 
-function policyBinding(proposal: GovernedPolicyVersionProposal): AuthorityGovernanceConsequenceBinding | null {
+/** Canonically binds every normative field of a governed policy proposal. */
+export async function computeCanonicalAuthorityPolicyVersionContentSha256(
+  proposal: Pick<GovernedPolicyVersionProposal,
+    "policyKey" | "expectedPredecessorPolicyVersionId" | "nextRevision" | "recordKind" | "normativeActionKey" | "authorityMode" | "scopeSchemaKey" | "scopeSchemaVersion" | "definitionJson" | "priorDecisionDisposition" | "reasonCode">,
+): Promise<string> {
+  return sha256(canonicalJson({
+    format: "authority-policy-version-content/v1",
+    policyKey: proposal.policyKey,
+    expectedPredecessorPolicyVersionId: proposal.expectedPredecessorPolicyVersionId,
+    nextRevision: proposal.nextRevision,
+    recordKind: proposal.recordKind,
+    normativeActionKey: proposal.normativeActionKey,
+    authorityMode: proposal.authorityMode,
+    scopeSchemaKey: proposal.scopeSchemaKey,
+    scopeSchemaVersion: proposal.scopeSchemaVersion,
+    definitionJson: canonicalJsonText(proposal.definitionJson),
+    priorDecisionDisposition: proposal.priorDecisionDisposition,
+    reasonCode: proposal.reasonCode,
+  }));
+}
+
+/** Canonically binds the ruleset parent fields and its complete canonical child set. */
+export async function computeCanonicalEligibilityRuleSetVersionContentSha256(
+  proposal: Pick<GovernedEligibilityRuleSetVersionProposal,
+    "ruleSetKey" | "expectedPredecessorRuleSetVersionId" | "nextRevision" | "recordKind" | "contractCatalogRevision" | "childRules">,
+): Promise<string> {
+  const childRuleSetSha256 = await computeCanonicalEligibilityRuleSetChildSha256(proposal.childRules);
+  return sha256(canonicalJson({
+    format: "authority-eligibility-ruleset-version-content/v1",
+    ruleSetKey: proposal.ruleSetKey,
+    expectedPredecessorRuleSetVersionId: proposal.expectedPredecessorRuleSetVersionId,
+    nextRevision: proposal.nextRevision,
+    recordKind: proposal.recordKind,
+    contractCatalogRevision: proposal.contractCatalogRevision,
+    childRuleSetSha256,
+  }));
+}
+
+async function policyBinding(proposal: GovernedPolicyVersionProposal): Promise<AuthorityGovernanceConsequenceBinding | null> {
   if (!text(proposal.id) || !text(proposal.policyKey) || !text(proposal.expectedPredecessorPolicyVersionId)
     || !positiveInteger(proposal.nextRevision) || !sha256Pattern.test(proposal.contentSha256)
     || !text(proposal.normativeActionKey) || !text(proposal.scopeSchemaKey) || !text(proposal.scopeSchemaVersion)
@@ -207,6 +251,11 @@ function policyBinding(proposal: GovernedPolicyVersionProposal): AuthorityGovern
     || (proposal.recordKind === "REVOCATION" && (proposal.definitionJson !== null || proposal.priorDecisionDisposition !== "INVALIDATE" || proposal.reasonCode === null))) return null;
   if (proposal.recordKind !== "POLICY" && proposal.recordKind !== "REVOCATION") return null;
   if (proposal.priorDecisionDisposition !== "PRESERVE" && proposal.priorDecisionDisposition !== "INVALIDATE") return null;
+  try {
+    if (proposal.contentSha256 !== await computeCanonicalAuthorityPolicyVersionContentSha256(proposal)) return null;
+  } catch {
+    return null;
+  }
   return {
     familyKind: "POLICY",
     successorId: proposal.id,
@@ -229,23 +278,14 @@ async function ruleSetBinding(proposal: GovernedEligibilityRuleSetVersionProposa
   if (!text(proposal.id) || !text(proposal.ruleSetKey) || !text(proposal.expectedPredecessorRuleSetVersionId)
     || !positiveInteger(proposal.nextRevision) || !text(proposal.contractCatalogRevision) || !sha256Pattern.test(proposal.contentSha256)
     || !text(proposal.governanceDecisionId) || (proposal.recordKind !== "RULESET" && proposal.recordKind !== "DISABLED")) return null;
-  if (proposal.recordKind === "DISABLED") {
-    if (proposal.childRules.length !== 0) return null;
-    const childRuleSetSha256 = await computeCanonicalEligibilityRuleSetChildSha256([]);
-    return {
-      familyKind: "ELIGIBILITY_RULESET", successorId: proposal.id, ruleSetKey: proposal.ruleSetKey,
-      expectedPredecessorId: proposal.expectedPredecessorRuleSetVersionId, nextRevision: proposal.nextRevision,
-      recordKind: proposal.recordKind, contractCatalogRevision: proposal.contractCatalogRevision,
-      proposedContentSha256: proposal.contentSha256, childRuleSetSha256,
-    };
-  }
+  if (proposal.recordKind === "DISABLED" && proposal.childRules.length !== 0) return null;
   let childRuleSetSha256: string;
   try {
     childRuleSetSha256 = await computeCanonicalEligibilityRuleSetChildSha256(proposal.childRules);
+    if (proposal.contentSha256 !== await computeCanonicalEligibilityRuleSetVersionContentSha256(proposal)) return null;
   } catch {
     return null;
   }
-  if (proposal.contentSha256 !== childRuleSetSha256) return null;
   return {
     familyKind: "ELIGIBILITY_RULESET", successorId: proposal.id, ruleSetKey: proposal.ruleSetKey,
     expectedPredecessorId: proposal.expectedPredecessorRuleSetVersionId, nextRevision: proposal.nextRevision,
@@ -397,9 +437,9 @@ INSERT INTO "ExecutorEligibilityRule" (
 `).bind(rule.id, ruleSetVersionId, rule.capabilityKey, rule.contractVariantKey, rule.executorType, rule.verdict, rule.conditionsSchemaKey, rule.conditionsJson, rule.ruleSha256);
 }
 
-function batchFailure(error: unknown, digest: string): AuthorityGovernanceCommitResult {
+export function classifyAuthorityGovernanceBatchFailure(error: unknown, digest: string): AuthorityGovernanceCommitResult {
   const message = error instanceof Error ? error.message : "";
-  if (/AUTHORITY_|ELIGIBILITY_|SQLITE_CONSTRAINT|D1_ERROR/i.test(message)) return { status: "DENIED", reasonCode: "GOVERNANCE_BATCH_REJECTED", canonicalRequestSha256: digest };
+  if (/AUTHORITY_|ELIGIBILITY_|UNIQUE constraint failed|CHECK constraint failed|FOREIGN KEY constraint failed|NOT NULL constraint failed/i.test(message)) return { status: "DENIED", reasonCode: "GOVERNANCE_BATCH_REJECTED", canonicalRequestSha256: digest };
   return { status: "UNRESOLVED", reasonCode: "GOVERNANCE_BATCH_UNKNOWN", canonicalRequestSha256: digest };
 }
 
@@ -469,7 +509,7 @@ export function createAuthorityGovernanceWriter(
   const createInvocationId = options.createInvocationId ?? (() => crypto.randomUUID());
 
   async function commitGovernedPolicyVersion(input: GovernedPolicyVersionCommitInput): Promise<AuthorityGovernanceCommitResult> {
-    const binding = policyBinding(input.proposal);
+    const binding = await policyBinding(input.proposal);
     if (binding === null || input.invocation.decisionId !== input.proposal.governanceDecisionId) return { status: "DENIED", reasonCode: "POLICY_PROPOSAL_INVALID" };
     const request = governanceRequest(input.invocation, binding);
     if (request === null) return { status: "DENIED", reasonCode: "GOVERNANCE_REQUEST_MISMATCH" };
@@ -481,7 +521,7 @@ export function createAuthorityGovernanceWriter(
       await database.batch([invocationStatement(database, createInvocationId(), prepared.fields), policyStatement(database, input.proposal)]);
       return { status: "COMMITTED", canonicalRequestSha256: prepared.fields.canonicalRequestSha256 };
     } catch (error) {
-      return batchFailure(error, prepared.fields.canonicalRequestSha256);
+      return classifyAuthorityGovernanceBatchFailure(error, prepared.fields.canonicalRequestSha256);
     }
   }
 
@@ -504,7 +544,7 @@ export function createAuthorityGovernanceWriter(
       ]);
       return { status: "COMMITTED", canonicalRequestSha256: prepared.fields.canonicalRequestSha256 };
     } catch (error) {
-      return batchFailure(error, prepared.fields.canonicalRequestSha256);
+      return classifyAuthorityGovernanceBatchFailure(error, prepared.fields.canonicalRequestSha256);
     }
   }
 

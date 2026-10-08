@@ -12,7 +12,10 @@ import {
 } from "./authority";
 import {
   authorityGovernanceActionKey,
+  classifyAuthorityGovernanceBatchFailure,
+  computeCanonicalAuthorityPolicyVersionContentSha256,
   computeCanonicalEligibilityRuleSetChildSha256,
+  computeCanonicalEligibilityRuleSetVersionContentSha256,
   createAuthorityGovernanceWriter,
   type AuthorityGovernanceD1Database,
   type AuthorityGovernanceWriter,
@@ -109,7 +112,7 @@ function governanceInvocation(input: Readonly<{
   };
 }
 
-async function setupPolicy(name: string, options: Readonly<{ recordKind?: "POLICY" | "REVOCATION"; contentSha256?: string }> = {}): Promise<GovernedPolicyVersionCommitInput> {
+async function setupPolicy(name: string, options: Readonly<{ recordKind?: "POLICY" | "REVOCATION" }> = {}): Promise<GovernedPolicyVersionCommitInput> {
   const recordKind = options.recordKind ?? "POLICY";
   const baseId = `policy-base-${name}`;
   const policyKey = `policy.target.${name}`;
@@ -127,7 +130,7 @@ INSERT INTO "AuthorityPolicyVersion" (
 `, baseId, policyKey, sha("a"));
   const subjectRefId = `subject-policy-${name}`;
   await insertSubject(subjectRefId, subject);
-  const proposal = {
+  const proposalDraft = {
     id: `policy-next-${name}`,
     policyKey,
     expectedPredecessorPolicyVersionId: baseId,
@@ -138,11 +141,11 @@ INSERT INTO "AuthorityPolicyVersion" (
     scopeSchemaKey: "scope/v1",
     scopeSchemaVersion: "1",
     definitionJson: recordKind === "POLICY" ? "{}" : null,
-    contentSha256: options.contentSha256 ?? sha("b"),
     priorDecisionDisposition: recordKind === "POLICY" ? "PRESERVE" as const : "INVALIDATE" as const,
     reasonCode: recordKind === "POLICY" ? null : "GOVERNANCE_REVOCATION",
     governanceDecisionId: `decision-policy-${name}`,
   };
+  const proposal = { ...proposalDraft, contentSha256: await computeCanonicalAuthorityPolicyVersionContentSha256(proposalDraft) };
   await insertGovernanceDecision({
     id: proposal.governanceDecisionId,
     subjectRefId,
@@ -183,18 +186,17 @@ INSERT INTO "ExecutorEligibilityRuleSetVersion" (
     conditionsJson: null,
     ruleSha256: sha("d"),
   }];
-  const contentSha256 = disabled ? sha("e") : await computeCanonicalEligibilityRuleSetChildSha256(rules);
-  const proposal = {
+  const proposalDraft = {
     id: `rules-next-${name}`,
     ruleSetKey,
     expectedPredecessorRuleSetVersionId: baseId,
     nextRevision: 2,
     recordKind: disabled ? "DISABLED" as const : "RULESET" as const,
     contractCatalogRevision: "catalog/v1",
-    contentSha256,
     governanceDecisionId: `decision-rules-${name}`,
     childRules: rules,
   };
+  const proposal = { ...proposalDraft, contentSha256: await computeCanonicalEligibilityRuleSetVersionContentSha256(proposalDraft) };
   await insertGovernanceDecision({
     id: proposal.governanceDecisionId,
     subjectRefId,
@@ -203,7 +205,7 @@ INSERT INTO "ExecutorEligibilityRuleSetVersion" (
     expectedPredecessorId: baseId,
     nextRevision: proposal.nextRevision,
     recordKind: proposal.recordKind,
-    contentSha256,
+    contentSha256: proposal.contentSha256,
   });
   return { invocation: governanceInvocation({ key: `invoke-rules-${name}`, decisionId: proposal.governanceDecisionId, subject }), proposal };
 }
@@ -256,7 +258,7 @@ VALUES ('rule-governance', 'rules-governance-1', 'authority.governance.commit', 
 
   it("commits governed POLICY and REVOCATION successors atomically", async () => {
     const policy = await setupPolicy("valid-policy");
-    const revocation = await setupPolicy("valid-revocation", { recordKind: "REVOCATION", contentSha256: sha("4") });
+    const revocation = await setupPolicy("valid-revocation", { recordKind: "REVOCATION" });
     await expect(writer.commitGovernedPolicyVersion(policy)).resolves.toMatchObject({ status: "COMMITTED" });
     await expect(writer.commitGovernedPolicyVersion(revocation)).resolves.toMatchObject({ status: "COMMITTED" });
     expect(await count("AuthorityInvocation", '"invocationKey" = ?', policy.invocation.invocationKey)).toBe(1);
@@ -271,6 +273,22 @@ VALUES ('rule-governance', 'rules-governance-1', 'authority.governance.commit', 
     await expect(writer.commitGovernedPolicyVersion(wrong)).resolves.toMatchObject({ status: "DENIED" });
     expect(await count("AuthorityInvocation", '"invocationKey" = ?', input.invocation.invocationKey)).toBe(0);
     expect(await count("AuthorityPolicyVersion", '"id" = ?', input.proposal.id)).toBe(0);
+  });
+
+  it("rejects stale full policy-content digests and cannot reuse a Decision after a valid rehash", async () => {
+    const policy = await setupPolicy("full-policy-digest");
+    const changedDefinition = { ...policy, proposal: { ...policy.proposal, definitionJson: '{"changed":true}' } };
+    const changedScope = { ...policy, proposal: { ...policy.proposal, scopeSchemaVersion: "2" } };
+    await expect(writer.commitGovernedPolicyVersion(changedDefinition)).resolves.toMatchObject({ status: "DENIED", reasonCode: "POLICY_PROPOSAL_INVALID" });
+    await expect(writer.commitGovernedPolicyVersion(changedScope)).resolves.toMatchObject({ status: "DENIED", reasonCode: "POLICY_PROPOSAL_INVALID" });
+
+    const rehashedDraft = { ...policy.proposal, definitionJson: '{"changed":true}' };
+    const rehashed = { ...policy, proposal: { ...rehashedDraft, contentSha256: await computeCanonicalAuthorityPolicyVersionContentSha256(rehashedDraft) } };
+    await expect(writer.commitGovernedPolicyVersion(rehashed)).resolves.toMatchObject({ status: "DENIED" });
+    expect(await count("AuthorityInvocation", '"invocationKey" = ?', policy.invocation.invocationKey)).toBe(0);
+
+    const revocation = await setupPolicy("full-revocation-digest", { recordKind: "REVOCATION" });
+    await expect(writer.commitGovernedPolicyVersion({ ...revocation, proposal: { ...revocation.proposal, reasonCode: "OTHER_REVOCATION_REASON" } })).resolves.toMatchObject({ status: "DENIED", reasonCode: "POLICY_PROPOSAL_INVALID" });
   });
 
   it("rejects a governance Decision revoked before policy commit", async () => {
@@ -289,7 +307,8 @@ VALUES ('decision-effect-revoke-policy', 'request:effect-revoke-policy', ?, 'APP
     const input = await setupPolicy("policy-retry");
     await expect(writer.commitGovernedPolicyVersion(input)).resolves.toMatchObject({ status: "COMMITTED" });
     await expect(writer.commitGovernedPolicyVersion(input)).resolves.toMatchObject({ status: "ALREADY_COMMITTED" });
-    const changed = { ...input, proposal: { ...input.proposal, contentSha256: sha("5") } };
+    const changedDraft = { ...input.proposal, definitionJson: '{"changed":true}' };
+    const changed = { ...input, proposal: { ...changedDraft, contentSha256: await computeCanonicalAuthorityPolicyVersionContentSha256(changedDraft) } };
     await expect(writer.commitGovernedPolicyVersion(changed)).resolves.toMatchObject({ status: "DIGEST_MISMATCH" });
   });
 
@@ -318,6 +337,26 @@ VALUES ('decision-effect-revoke-policy', 'request:effect-revoke-policy', ?, 'APP
     expect(await count("ExecutorEligibilityRule", '"ruleSetVersionId" = ?', rules.proposal.id)).toBe(2);
     expect(await count("AuthorityInvocation", '"invocationKey" = ?', rules.invocation.invocationKey)).toBe(1);
     expect(await count("ExecutorEligibilityRule", '"ruleSetVersionId" = ?', disabled.proposal.id)).toBe(0);
+  });
+
+  it("rejects stale full ruleset-content digests and a rehashed proposal without a matching Decision", async () => {
+    const rules = await setupRuleSet("full-rules-digest");
+    const changedCatalog = { ...rules, proposal: { ...rules.proposal, contractCatalogRevision: "catalog/v2" } };
+    const changedChildren = rules.proposal.childRules.map((rule) => ({ ...rule, ruleSha256: sha("e") }));
+    const changedChildSet = { ...rules, proposal: { ...rules.proposal, childRules: changedChildren } };
+    await expect(writer.commitGovernedEligibilityRuleSetVersion(changedCatalog)).resolves.toMatchObject({ status: "DENIED", reasonCode: "RULESET_PROPOSAL_INVALID" });
+    await expect(writer.commitGovernedEligibilityRuleSetVersion(changedChildSet)).resolves.toMatchObject({ status: "DENIED", reasonCode: "RULESET_PROPOSAL_INVALID" });
+
+    const rehashedDraft = { ...rules.proposal, contractCatalogRevision: "catalog/v2" };
+    const rehashed = { ...rules, proposal: { ...rehashedDraft, contentSha256: await computeCanonicalEligibilityRuleSetVersionContentSha256(rehashedDraft) } };
+    await expect(writer.commitGovernedEligibilityRuleSetVersion(rehashed)).resolves.toMatchObject({ status: "DENIED" });
+    expect(await count("AuthorityInvocation", '"invocationKey" = ?', rules.invocation.invocationKey)).toBe(0);
+  });
+
+  it("classifies only known deterministic D1 failures as denied", () => {
+    expect(classifyAuthorityGovernanceBatchFailure(new Error("D1_ERROR: transport unavailable"), sha("f"))).toMatchObject({ status: "UNRESOLVED", reasonCode: "GOVERNANCE_BATCH_UNKNOWN" });
+    expect(classifyAuthorityGovernanceBatchFailure(new Error("D1_ERROR: AUTHORITY_INVOCATION_RULE_MISMATCH"), sha("f"))).toMatchObject({ status: "DENIED", reasonCode: "GOVERNANCE_BATCH_REJECTED" });
+    expect(classifyAuthorityGovernanceBatchFailure(new Error("UNIQUE constraint failed: AuthorityInvocation.invocationKey"), sha("f"))).toMatchObject({ status: "DENIED", reasonCode: "GOVERNANCE_BATCH_REJECTED" });
   });
 
   it("rolls back invocation, parent, and all children when one ruleset child violates D1", async () => {
@@ -351,7 +390,8 @@ VALUES ('decision-effect-revoke-rules', 'request:effect-revoke-rules', ?, 'APPRO
     await expect(writer.commitGovernedEligibilityRuleSetVersion(retry)).resolves.toMatchObject({ status: "COMMITTED" });
     await expect(writer.commitGovernedEligibilityRuleSetVersion(retry)).resolves.toMatchObject({ status: "ALREADY_COMMITTED" });
     const changedRules = retry.proposal.childRules.map((rule, index) => index === 0 ? { ...rule, ruleSha256: sha("b") } : rule);
-    const changed = { ...retry, proposal: { ...retry.proposal, childRules: changedRules, contentSha256: await computeCanonicalEligibilityRuleSetChildSha256(changedRules) } };
+    const changedDraft = { ...retry.proposal, childRules: changedRules };
+    const changed = { ...retry, proposal: { ...changedDraft, contentSha256: await computeCanonicalEligibilityRuleSetVersionContentSha256(changedDraft) } };
     await expect(writer.commitGovernedEligibilityRuleSetVersion(changed)).resolves.toMatchObject({ status: "DIGEST_MISMATCH" });
 
     const incomplete = await setupRuleSet("rules-incomplete");

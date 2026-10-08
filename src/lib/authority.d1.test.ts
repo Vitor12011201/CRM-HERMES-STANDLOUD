@@ -8,6 +8,7 @@ import {
   canonicalizeAuthoritySubject,
   createAuthorityEvaluator,
   createTr03AuthoritySubjectResolverRegistry,
+  prepareAuthorizedAuthorityInvocation,
   type AuthorityD1Database,
   type AuthorityInvocationRequest,
 } from "./authority";
@@ -260,5 +261,64 @@ INSERT INTO "AuthorityInvocation" (
     });
     await expect(evaluator.reconcileAuthorityInvocation("reconcile-key", sha("5"))).resolves.toMatchObject({ status: "DIGEST_MISMATCH", invocationId: "invocation-reconcile-1" });
     expect("commitAuthorityInvocation" in evaluator).toBe(false);
+  });
+
+  it("keeps evaluator and D1 aligned across PRESERVE, then rejects an INVALIDATE successor", async () => {
+    await execute(`
+INSERT INTO "Decision" (
+  "id", "decisionRequestKey", "normativeActionKey", "outcomeKey", "decidingActorId", "subjectRefId", "basisPolicyVersionId", "issuedAt"
+) VALUES ('decision-human-preserve', 'request:human:preserve', 'HUMAN_ACTION', 'APPROVED', 'actor-human', 'subject-policy-auto', 'policy-human-1', ?)
+`, timestamp);
+    const preserveContent = sha("6");
+    await execute(`
+INSERT INTO "Decision" (
+  "id", "decisionRequestKey", "normativeActionKey", "outcomeKey", "decidingActorId", "subjectRefId", "basisPolicyVersionId", "conditionsSchemaKey", "conditionsJson", "conditionsSha256", "issuedAt"
+) VALUES ('decision-policy-human-preserve', 'request:policy:human:preserve', 'AUTHORITY_POLICY_GOVERNANCE', 'APPROVED', 'actor-human', 'subject-policy-human', 'policy-governance-1', 'authority-kernel-governance-proposal/v1', ?, ?, ?)
+`, JSON.stringify({ familyKind: "POLICY", familyKey: "policy.human", expectedPredecessorId: "policy-human-1", nextRevision: 2, recordKind: "POLICY", proposedContentSha256: preserveContent }), sha("7"), timestamp);
+    await execute(`
+INSERT INTO "AuthorityPolicyVersion" (
+  "id", "policyKey", "revision", "predecessorPolicyVersionId", "recordKind", "normativeActionKey", "authorityMode", "scopeSchemaKey", "scopeSchemaVersion", "definitionJson", "contentSha256", "priorDecisionDisposition", "governanceDecisionId"
+) VALUES ('policy-human-2-preserved', 'policy.human', 2, 'policy-human-1', 'POLICY', 'HUMAN_ACTION', 'HUMAN_GATED', 'scope/v1', '1', '{}', ?, 'PRESERVE', 'decision-policy-human-preserve')
+`, preserveContent);
+
+    const request = autoRequest({
+      invocationKey: "invoke:human:preserve",
+      normativeActionKey: "HUMAN_ACTION",
+      capabilityKey: "cap.human",
+      executorActorId: "actor-human",
+      executorType: "HUMAN_EXECUTOR",
+      requestedAuthorityMode: "HUMAN_GATED",
+      policyKey: "policy.human",
+      decisionId: "decision-human-preserve",
+    });
+    const evaluation = await evaluator.evaluateInvocation(request);
+    expect(evaluation).toMatchObject({ outcome: "AUTHORIZED", context: { policyVersionId: "policy-human-2-preserved", decisionId: "decision-human-preserve" } });
+    if (evaluation.outcome !== "AUTHORIZED") throw new Error("Expected PRESERVE authorization fixture.");
+    const prepared = await prepareAuthorizedAuthorityInvocation(request, evaluation);
+    await execute(`
+INSERT INTO "AuthorityInvocation" (
+  "id", "invocationKey", "canonicalRequestSha256", "normativeActionKey", "capabilityKey", "contractVariantKey", "executorActorId", "executorType", "subjectRefId", "caseSubjectRefId", "policyVersionId", "eligibilityRuleSetVersionId", "eligibilityRuleId", "decisionId", "delegationGrantId", "outcome", "lineageSha256", "evaluatedAt"
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, "invocation-human-preserve", prepared.fields.invocationKey, prepared.fields.canonicalRequestSha256, prepared.fields.normativeActionKey, prepared.fields.capabilityKey, prepared.fields.contractVariantKey, prepared.fields.executorActorId, prepared.fields.executorType, prepared.fields.subjectRefId, prepared.fields.caseSubjectRefId, prepared.fields.policyVersionId, prepared.fields.eligibilityRuleSetVersionId, prepared.fields.eligibilityRuleId, prepared.fields.decisionId, prepared.fields.delegationGrantId, prepared.fields.outcome, prepared.fields.lineageSha256, prepared.fields.evaluatedAt);
+
+    const policyHumanV2Subject = { ...policyHumanSubject, versionToken: "policy-human-2-preserved" };
+    await insertSubject("subject-policy-human-2-preserved", policyHumanV2Subject);
+    const invalidateContent = sha("8");
+    await execute(`
+INSERT INTO "Decision" (
+  "id", "decisionRequestKey", "normativeActionKey", "outcomeKey", "decidingActorId", "subjectRefId", "basisPolicyVersionId", "conditionsSchemaKey", "conditionsJson", "conditionsSha256", "issuedAt"
+) VALUES ('decision-policy-human-invalidate', 'request:policy:human:invalidate', 'AUTHORITY_POLICY_GOVERNANCE', 'APPROVED', 'actor-human', 'subject-policy-human-2-preserved', 'policy-governance-1', 'authority-kernel-governance-proposal/v1', ?, ?, ?)
+`, JSON.stringify({ familyKind: "POLICY", familyKey: "policy.human", expectedPredecessorId: "policy-human-2-preserved", nextRevision: 3, recordKind: "REVOCATION", proposedContentSha256: invalidateContent }), sha("9"), timestamp);
+    await execute(`
+INSERT INTO "AuthorityPolicyVersion" (
+  "id", "policyKey", "revision", "predecessorPolicyVersionId", "recordKind", "normativeActionKey", "authorityMode", "scopeSchemaKey", "scopeSchemaVersion", "definitionJson", "contentSha256", "priorDecisionDisposition", "governanceDecisionId", "reasonCode"
+) VALUES ('policy-human-3-invalidated', 'policy.human', 3, 'policy-human-2-preserved', 'REVOCATION', 'HUMAN_ACTION', 'HUMAN_GATED', 'scope/v1', '1', NULL, ?, 'INVALIDATE', 'decision-policy-human-invalidate', 'TEST_INVALIDATE')
+`, invalidateContent);
+    await expect(evaluator.evaluateInvocation({ ...request, invocationKey: "invoke:human:invalidated" })).resolves.toMatchObject({ outcome: "DENIED", reasonCode: "POLICY_DISABLED_OR_REVOKED" });
+    await expect(execute(`
+INSERT INTO "AuthorityInvocation" (
+  "id", "invocationKey", "canonicalRequestSha256", "normativeActionKey", "capabilityKey", "contractVariantKey", "executorActorId", "executorType", "subjectRefId", "caseSubjectRefId", "policyVersionId", "eligibilityRuleSetVersionId", "eligibilityRuleId", "decisionId", "delegationGrantId", "outcome", "lineageSha256", "evaluatedAt"
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, "invocation-human-invalidated", "invoke:human:invalidated", prepared.fields.canonicalRequestSha256, prepared.fields.normativeActionKey, prepared.fields.capabilityKey, prepared.fields.contractVariantKey, prepared.fields.executorActorId, prepared.fields.executorType, prepared.fields.subjectRefId, prepared.fields.caseSubjectRefId, "policy-human-3-invalidated", prepared.fields.eligibilityRuleSetVersionId, prepared.fields.eligibilityRuleId, prepared.fields.decisionId, prepared.fields.delegationGrantId, prepared.fields.outcome, prepared.fields.lineageSha256, prepared.fields.evaluatedAt)).rejects.toThrow(/AUTHORITY_INVOCATION_HUMAN_GATED_MISMATCH/);
   });
 });

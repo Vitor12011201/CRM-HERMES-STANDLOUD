@@ -180,7 +180,7 @@ describe("TR-03B real disposable D1 authority kernel", () => {
     if (temporaryRoot) rmSync(temporaryRoot, { recursive: true, force: true });
   });
 
-  it("cleanly bootstraps 0001 through 0009 with exactly the authority-kernel tables and no authority rows", async () => {
+  it("cleanly bootstraps 0001 through 0010 with exactly the authority-kernel tables and no authority rows", async () => {
     const authorityTables = [
       "AuthorityBootstrapReceipt",
       "AuthoritySubjectRef",
@@ -193,14 +193,14 @@ describe("TR-03B real disposable D1 authority kernel", () => {
       "AuthorityInvocation",
     ];
     const quotedTables = authorityTables.map(quote).join(", ");
-    expect(await countRows("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(9);
+    expect(await countRows("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(10);
     expect(await countRows(`SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'table' AND name IN (${quotedTables})`)).toBe(9);
     expect(await countRows("SELECT COUNT(*) AS total FROM \"AuthorityBootstrapReceipt\"")).toBe(0);
     expect(await countRows("SELECT COUNT(*) AS total FROM \"AuthorityInvocation\"")).toBe(0);
     expect(await countRows("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'trigger' AND name = 'AuthorityInvocation_generic_guard' ")).toBe(1);
   }, 120_000);
 
-  it("upgrades the approved legacy 0001 + 0002 + 0007 + 0008 state through 0009 and reapplies as a no-op", () => {
+  it("upgrades the approved legacy 0001 + 0002 + 0007 + 0008 state through 0010 and reapplies as a no-op", () => {
     const upgradeRoot = join(temporaryRoot, "legacy-upgrade");
     const { configPath, migrationsDirectory } = createLegacyConfig(upgradeRoot);
     const legacyMigrationFiles = [
@@ -215,10 +215,11 @@ describe("TR-03B real disposable D1 authority kernel", () => {
     const legacyPersistPath = join(upgradeRoot, "persist");
     runWrangler(["d1", "migrations", "apply", "tr03b-legacy-upgrade", "--config", configPath, "--local", "--persist-to", legacyPersistPath]);
     cpSync(join(repositoryRoot, "prisma", "migrations", "0009_authority_kernel.sql"), join(migrationsDirectory, "0009_authority_kernel.sql"));
+    cpSync(join(repositoryRoot, "prisma", "migrations", "0010_authority_hardening.sql"), join(migrationsDirectory, "0010_authority_hardening.sql"));
     runWrangler(["d1", "migrations", "apply", "tr03b-legacy-upgrade", "--config", configPath, "--local", "--persist-to", legacyPersistPath]);
     const output = runWrangler([...d1Args(legacyPersistPath, "tr03b-legacy-upgrade", configPath), "--command", "SELECT COUNT(*) AS total FROM d1_migrations", "--json"]);
     const applied = (JSON.parse(output) as Array<{ results?: Array<Record<string, unknown>> }>)[0]?.results ?? [];
-    expect(Number(applied[0]?.total)).toBe(5);
+    expect(Number(applied[0]?.total)).toBe(6);
     const reapply = runWrangler(["d1", "migrations", "apply", "tr03b-legacy-upgrade", "--config", configPath, "--local", "--persist-to", legacyPersistPath]);
     expect(reapply).toMatch(/No migrations to apply/i);
   }, 120_000);
@@ -384,6 +385,21 @@ INSERT INTO "AuthorityInvocation" (
   "id", "invocationKey", "canonicalRequestSha256", "normativeActionKey", "capabilityKey", "executorActorId", "executorType", "subjectRefId", "policyVersionId", "eligibilityRuleSetVersionId", "eligibilityRuleId", "decisionId", "outcome", "lineageSha256", "evaluatedAt"
 ) VALUES ('invocation-human-valid', 'invoke:human:valid', ${quote(sha("3"))}, 'HUMAN_ACTION', 'cap.human', 'actor-human', 'HUMAN_EXECUTOR', 'subject-main', 'policy-human-1', 'rules-invoke-1', 'rule-human', 'decision-human-1', 'AUTHORIZED', ${quote(sha("4"))}, ${quote(timestamp)})
 `);
+    await executeSql(`
+INSERT INTO "Decision" ("id", "decisionRequestKey", "normativeActionKey", "outcomeKey", "decidingActorId", "subjectRefId", "scopeRootSubjectRefId", "basisPolicyVersionId", "issuedAt") VALUES
+  ('decision-human-nonhuman', 'request:human:nonhuman', 'HUMAN_ACTION', 'APPROVED', 'actor-system', 'subject-main', NULL, 'policy-human-1', ${quote(timestamp)}),
+  ('decision-human-scoped', 'request:human:scoped', 'HUMAN_ACTION', 'APPROVED', 'actor-human', 'subject-main', 'subject-main', 'policy-human-1', ${quote(timestamp)});
+`);
+    await expectSqlFailure(`
+INSERT INTO "AuthorityInvocation" (
+  "id", "invocationKey", "canonicalRequestSha256", "normativeActionKey", "capabilityKey", "executorActorId", "executorType", "subjectRefId", "policyVersionId", "eligibilityRuleSetVersionId", "eligibilityRuleId", "decisionId", "outcome", "lineageSha256", "evaluatedAt"
+) VALUES ('invocation-human-nonhuman', 'invoke:human:nonhuman', ${quote(sha("e"))}, 'HUMAN_ACTION', 'cap.human', 'actor-human', 'HUMAN_EXECUTOR', 'subject-main', 'policy-human-1', 'rules-invoke-1', 'rule-human', 'decision-human-nonhuman', 'AUTHORIZED', ${quote(sha("f"))}, ${quote(timestamp)})
+`, "AUTHORITY_INVOCATION_HUMAN_GATED_MISMATCH");
+    await expectSqlFailure(`
+INSERT INTO "AuthorityInvocation" (
+  "id", "invocationKey", "canonicalRequestSha256", "normativeActionKey", "capabilityKey", "executorActorId", "executorType", "subjectRefId", "caseSubjectRefId", "policyVersionId", "eligibilityRuleSetVersionId", "eligibilityRuleId", "decisionId", "outcome", "lineageSha256", "evaluatedAt"
+) VALUES ('invocation-human-scope-mismatch', 'invoke:human:scope-mismatch', ${quote(sha("1"))}, 'HUMAN_ACTION', 'cap.human', 'actor-human', 'HUMAN_EXECUTOR', 'subject-main', NULL, 'policy-human-1', 'rules-invoke-1', 'rule-human', 'decision-human-scoped', 'AUTHORIZED', ${quote(sha("2"))}, ${quote(timestamp)})
+`, "AUTHORITY_INVOCATION_HUMAN_GATED_MISMATCH");
     await insertGovernanceDecision({
       id: "decision-policy-human-revocation",
       subjectRefId: "subject-policy-human",
@@ -398,18 +414,23 @@ INSERT INTO "AuthorityPolicyVersion" (
 INSERT INTO "AuthorityInvocation" (
   "id", "invocationKey", "canonicalRequestSha256", "normativeActionKey", "capabilityKey", "executorActorId", "executorType", "subjectRefId", "policyVersionId", "eligibilityRuleSetVersionId", "eligibilityRuleId", "decisionId", "outcome", "lineageSha256", "evaluatedAt"
 ) VALUES ('invocation-human-revoked', 'invoke:human:revoked', ${quote(sha("6"))}, 'HUMAN_ACTION', 'cap.human', 'actor-human', 'HUMAN_EXECUTOR', 'subject-main', 'policy-human-1', 'rules-invoke-1', 'rule-human', 'decision-human-1', 'AUTHORIZED', ${quote(sha("7"))}, ${quote(laterTimestamp)})
-`, "AUTHORITY_INVOCATION_DECISION_POLICY_INVALIDATED");
+`, "AUTHORITY_INVOCATION_HUMAN_GATED_MISMATCH");
   });
 
-  it("requires active, unrecalled delegation for delegated invocations", async () => {
+  it("requires active, scope-coherent, unrecalled delegation for delegated invocations", async () => {
     await executeSql(`
 INSERT INTO "DelegationGrant" (
   "id", "grantRequestKey", "grantedPolicyVersionId", "delegatorActorId", "delegateActorId", "scopeRootSubjectRefId", "scopeSchemaKey", "scopeJson", "scopeSha256", "validFrom", "validUntil", "grantingPolicyVersionId"
 ) VALUES ('delegation-1', 'grant:1', 'policy-delegated-1', 'actor-principal', 'actor-system', 'subject-main', 'scope/v1', '{}', ${quote(sha("8"))}, '2026-10-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z', 'policy-governance-1');
 INSERT INTO "AuthorityInvocation" (
-  "id", "invocationKey", "canonicalRequestSha256", "normativeActionKey", "capabilityKey", "executorActorId", "executorType", "subjectRefId", "policyVersionId", "eligibilityRuleSetVersionId", "eligibilityRuleId", "delegationGrantId", "outcome", "lineageSha256", "evaluatedAt"
-) VALUES ('invocation-delegated-valid', 'invoke:delegated:valid', ${quote(sha("9"))}, 'DELEGATED_ACTION', 'cap.delegated', 'actor-system', 'DETERMINISTIC_SYSTEM', 'subject-main', 'policy-delegated-1', 'rules-invoke-1', 'rule-delegated', 'delegation-1', 'AUTHORIZED', ${quote(sha("a"))}, ${quote(timestamp)});
+  "id", "invocationKey", "canonicalRequestSha256", "normativeActionKey", "capabilityKey", "executorActorId", "executorType", "subjectRefId", "caseSubjectRefId", "policyVersionId", "eligibilityRuleSetVersionId", "eligibilityRuleId", "delegationGrantId", "outcome", "lineageSha256", "evaluatedAt"
+) VALUES ('invocation-delegated-valid', 'invoke:delegated:valid', ${quote(sha("9"))}, 'DELEGATED_ACTION', 'cap.delegated', 'actor-system', 'DETERMINISTIC_SYSTEM', 'subject-main', 'subject-main', 'policy-delegated-1', 'rules-invoke-1', 'rule-delegated', 'delegation-1', 'AUTHORIZED', ${quote(sha("a"))}, ${quote(timestamp)});
 `);
+    await expectSqlFailure(`
+INSERT INTO "AuthorityInvocation" (
+  "id", "invocationKey", "canonicalRequestSha256", "normativeActionKey", "capabilityKey", "executorActorId", "executorType", "subjectRefId", "policyVersionId", "eligibilityRuleSetVersionId", "eligibilityRuleId", "delegationGrantId", "outcome", "lineageSha256", "evaluatedAt"
+) VALUES ('invocation-delegated-scope-mismatch', 'invoke:delegated:scope-mismatch', ${quote(sha("d"))}, 'DELEGATED_ACTION', 'cap.delegated', 'actor-system', 'DETERMINISTIC_SYSTEM', 'subject-main', 'policy-delegated-1', 'rules-invoke-1', 'rule-delegated', 'delegation-1', 'AUTHORIZED', ${quote(sha("e"))}, ${quote(timestamp)})
+`, "AUTHORITY_INVOCATION_DELEGATED_MISMATCH");
     await expectSqlFailure(`
 INSERT INTO "AuthorityInvocation" (
   "id", "invocationKey", "canonicalRequestSha256", "normativeActionKey", "capabilityKey", "executorActorId", "executorType", "subjectRefId", "policyVersionId", "eligibilityRuleSetVersionId", "eligibilityRuleId", "delegationGrantId", "outcome", "lineageSha256", "evaluatedAt"
@@ -527,7 +548,12 @@ INSERT INTO "AuthorityCommitGuardDependent" ("id", "phase") VALUES ('guarded-dep
     }
   });
 
-  it("reapplies 0001 through 0009 as a no-op", () => {
+  it("freezes Actor rows after creation", async () => {
+    await expectSqlFailure(`UPDATE "Actor" SET "category" = 'SYSTEM' WHERE "id" = 'actor-human'`, "ACTOR_IMMUTABLE");
+    await expectSqlFailure(`DELETE FROM "Actor" WHERE "id" = 'actor-human'`, "ACTOR_DELETE_FORBIDDEN");
+  });
+
+  it("reapplies 0001 through 0010 as a no-op", () => {
     const output = runWrangler([
       "d1",
       "migrations",
