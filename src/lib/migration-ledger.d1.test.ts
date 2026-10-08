@@ -219,8 +219,8 @@ describe("TR-02B real disposable D1 migration ledger", () => {
     if (temporaryRoot) rmSync(temporaryRoot, { recursive: true, force: true });
   });
 
-  it("bootstraps 0001 through 0010 without ledger rows", async () => {
-    expect(await scalar("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(10);
+  it("bootstraps 0001 through 0011 without ledger rows", async () => {
+    expect(await scalar("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(11);
     expect(await scalar("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'table' AND name IN ('MigrationUnit', 'MigrationAttempt', 'MigrationTargetRef')")).toBe(3);
     expect(await scalar("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'index' AND name = 'MigrationAttempt_one_pending_per_unit'")).toBe(1);
     expect(await scalar("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'trigger' AND name IN ('MigrationUnit_identity_immutable', 'MigrationAttempt_transition_guard', 'MigrationTargetRef_insert_pending_attempt_only')")).toBe(3);
@@ -558,7 +558,7 @@ WHERE "id" = ?
     expect(await writer.getMigrationTargetRefs(pending.unit.id)).toHaveLength(1);
   });
 
-  it("upgrades a disposable legacy 0001..0002 database through 0010 and reapplies cleanly", () => {
+  it("upgrades a disposable legacy 0001..0002 database through 0011 and reapplies cleanly", () => {
     const upgradeRoot = join(temporaryRoot, "legacy-upgrade");
     const { configPath, migrationsDirectory } = createLegacyConfig(upgradeRoot);
     const migrationFiles = [
@@ -572,6 +572,7 @@ WHERE "id" = ?
       "0008_migration_ledger.sql",
       "0009_authority_kernel.sql",
       "0010_authority_hardening.sql",
+      "0011_execution_run_kernel.sql",
     ];
     for (const migration of migrationFiles.slice(0, 2)) {
       cpSync(join(repositoryRoot, "prisma", "migrations", migration), join(migrationsDirectory, migration));
@@ -584,7 +585,7 @@ WHERE "id" = ?
     runWrangler(["d1", "migrations", "apply", "tr02b-legacy-upgrade", "--config", configPath, "--local", "--persist-to", legacyPersistPath]);
     const output = runWrangler([...d1Args(legacyPersistPath, "tr02b-legacy-upgrade", configPath), "--command", "SELECT COUNT(*) AS total FROM d1_migrations", "--json"]);
     const applied = (JSON.parse(output) as Array<{ results?: Array<Record<string, unknown>> }>)[0]?.results ?? [];
-    expect(Number(applied[0]?.total)).toBe(10);
+    expect(Number(applied[0]?.total)).toBe(11);
     const reapply = runWrangler(["d1", "migrations", "apply", "tr02b-legacy-upgrade", "--config", configPath, "--local", "--persist-to", legacyPersistPath]);
     expect(reapply).toMatch(/No migrations to apply/i);
   }, 120_000);

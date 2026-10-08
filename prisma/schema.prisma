@@ -174,6 +174,12 @@ enum AuthorityInvocationOutcome {
   AUTHORIZED
 }
 
+enum ExecutionRunStatus {
+  STARTED
+  SUCCESS
+  FAILED
+}
+
 model Lead {
   id                 String         @id @default(cuid())
   companyName        String
@@ -461,6 +467,7 @@ model Actor {
   delegatedBy           DelegationGrant[]          @relation("DelegationGrantingActor")
   delegatedTo           DelegationGrant[]          @relation("DelegationDelegateActor")
   authorityInvocations  AuthorityInvocation[]      @relation("AuthorityInvocationExecutorActor")
+  executionRuns         ExecutionRun[]             @relation("ExecutionRunExecutorActor")
 }
 
 model AuthorityBootstrapReceipt {
@@ -491,6 +498,7 @@ model AuthoritySubjectRef {
   delegationScopes       DelegationGrant[]         @relation("DelegationScopeRootSubject")
   invocationSubjects     AuthorityInvocation[]     @relation("AuthorityInvocationSubject")
   invocationCaseSubjects AuthorityInvocation[]     @relation("AuthorityInvocationCaseSubject")
+  executionRuns          ExecutionRun[]            @relation("ExecutionRunAuthoritySubject")
 
   @@index([subjectType, subjectId])
 }
@@ -667,9 +675,46 @@ model AuthorityInvocation {
   eligibilityRule             ExecutorEligibilityRule          @relation("AuthorityInvocationEligibilityRule", fields: [eligibilityRuleId, eligibilityRuleSetVersionId], references: [id, ruleSetVersionId], onDelete: Restrict, onUpdate: Restrict)
   decision                    Decision?                        @relation("AuthorityInvocationDecision", fields: [decisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   delegationGrant             DelegationGrant?                 @relation("AuthorityInvocationDelegation", fields: [delegationGrantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  executionRuns               ExecutionRun[]                   @relation("ExecutionRunAuthorityInvocation")
 
   @@index([subjectRefId, normativeActionKey])
   @@index([policyVersionId])
+}
+
+/// One durable technical attempt. It is mutable only for its single terminal
+/// transition from STARTED to SUCCESS or FAILED; database triggers enforce the
+/// lifecycle and protect all other fields.
+model ExecutionRun {
+  id                     String               @id @default(uuid())
+  attemptKey             String               @unique
+  canonicalAttemptSha256 String
+  executionRequestKey    String
+  attemptNumber          Int
+  retryOfExecutionRunId  String?
+  executorActorId        String
+  authorityInvocationId  String?
+  authoritySubjectRefId  String?
+  capabilityKey          String
+  contractVariantKey     String?
+  correlationKey         String?
+  status                 ExecutionRunStatus
+  startedAt              DateTime
+  finishedAt             DateTime?
+  failureCode            String?
+  diagnosticSummary      String?
+  diagnosticSha256       String?
+  createdAt              DateTime             @default(now())
+  retryOf                ExecutionRun?        @relation("ExecutionRunRetryChain", fields: [retryOfExecutionRunId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  retries                ExecutionRun[]       @relation("ExecutionRunRetryChain")
+  executorActor          Actor                @relation("ExecutionRunExecutorActor", fields: [executorActorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  authorityInvocation    AuthorityInvocation? @relation("ExecutionRunAuthorityInvocation", fields: [authorityInvocationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  authoritySubjectRef    AuthoritySubjectRef? @relation("ExecutionRunAuthoritySubject", fields: [authoritySubjectRefId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([executionRequestKey, attemptNumber])
+  @@index([executionRequestKey])
+  @@index([status, startedAt])
+  @@index([executorActorId, startedAt])
+  @@index([authorityInvocationId])
 }
 
 model MigrationUnit {

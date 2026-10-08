@@ -180,7 +180,7 @@ describe("TR-03B real disposable D1 authority kernel", () => {
     if (temporaryRoot) rmSync(temporaryRoot, { recursive: true, force: true });
   });
 
-  it("cleanly bootstraps 0001 through 0010 with exactly the authority-kernel tables and no authority rows", async () => {
+  it("cleanly bootstraps 0001 through 0011 with exactly the authority-kernel tables and no authority rows", async () => {
     const authorityTables = [
       "AuthorityBootstrapReceipt",
       "AuthoritySubjectRef",
@@ -193,14 +193,14 @@ describe("TR-03B real disposable D1 authority kernel", () => {
       "AuthorityInvocation",
     ];
     const quotedTables = authorityTables.map(quote).join(", ");
-    expect(await countRows("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(10);
+    expect(await countRows("SELECT COUNT(*) AS total FROM d1_migrations")).toBe(11);
     expect(await countRows(`SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'table' AND name IN (${quotedTables})`)).toBe(9);
     expect(await countRows("SELECT COUNT(*) AS total FROM \"AuthorityBootstrapReceipt\"")).toBe(0);
     expect(await countRows("SELECT COUNT(*) AS total FROM \"AuthorityInvocation\"")).toBe(0);
     expect(await countRows("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'trigger' AND name = 'AuthorityInvocation_generic_guard' ")).toBe(1);
   }, 120_000);
 
-  it("upgrades the approved legacy 0001 + 0002 + 0007 + 0008 state through 0010 and reapplies as a no-op", () => {
+  it("upgrades the approved legacy 0001 + 0002 + 0007 + 0008 state through 0011 and reapplies as a no-op", () => {
     const upgradeRoot = join(temporaryRoot, "legacy-upgrade");
     const { configPath, migrationsDirectory } = createLegacyConfig(upgradeRoot);
     const legacyMigrationFiles = [
@@ -216,10 +216,11 @@ describe("TR-03B real disposable D1 authority kernel", () => {
     runWrangler(["d1", "migrations", "apply", "tr03b-legacy-upgrade", "--config", configPath, "--local", "--persist-to", legacyPersistPath]);
     cpSync(join(repositoryRoot, "prisma", "migrations", "0009_authority_kernel.sql"), join(migrationsDirectory, "0009_authority_kernel.sql"));
     cpSync(join(repositoryRoot, "prisma", "migrations", "0010_authority_hardening.sql"), join(migrationsDirectory, "0010_authority_hardening.sql"));
+    cpSync(join(repositoryRoot, "prisma", "migrations", "0011_execution_run_kernel.sql"), join(migrationsDirectory, "0011_execution_run_kernel.sql"));
     runWrangler(["d1", "migrations", "apply", "tr03b-legacy-upgrade", "--config", configPath, "--local", "--persist-to", legacyPersistPath]);
     const output = runWrangler([...d1Args(legacyPersistPath, "tr03b-legacy-upgrade", configPath), "--command", "SELECT COUNT(*) AS total FROM d1_migrations", "--json"]);
     const applied = (JSON.parse(output) as Array<{ results?: Array<Record<string, unknown>> }>)[0]?.results ?? [];
-    expect(Number(applied[0]?.total)).toBe(6);
+    expect(Number(applied[0]?.total)).toBe(7);
     const reapply = runWrangler(["d1", "migrations", "apply", "tr03b-legacy-upgrade", "--config", configPath, "--local", "--persist-to", legacyPersistPath]);
     expect(reapply).toMatch(/No migrations to apply/i);
   }, 120_000);
@@ -553,7 +554,7 @@ INSERT INTO "AuthorityCommitGuardDependent" ("id", "phase") VALUES ('guarded-dep
     await expectSqlFailure(`DELETE FROM "Actor" WHERE "id" = 'actor-human'`, "ACTOR_DELETE_FORBIDDEN");
   });
 
-  it("reapplies 0001 through 0010 as a no-op", () => {
+  it("reapplies 0001 through 0011 as a no-op", () => {
     const output = runWrangler([
       "d1",
       "migrations",
